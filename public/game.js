@@ -44,13 +44,7 @@
     HOP_ARC: 0.55,          // peak hop height, in tiles
     MIN_X: -8,              // wider field than the visible window
     MAX_X: 8,
-    VIEW_COLS: 7.6,         // tile columns across the viewport (reference scale)
-    PLAYER_SCREEN_Y: 0.70,  // player rests this far down the screen
-
-    // The board is built axis-aligned and tilted as one unit at draw time.
-    // Gameplay never sees this; it is purely how the picture is framed.
-    WORLD_ANGLE: 0.255,     // ~14.6 deg, lanes running DOWN to the right
-    WORLD_SQUASH: 1.0,      // rows and columns share a pitch, like the reference
+   var SOCKET_URL = RENDER_URL;
     SAFE_ROWS: 4,           // grass runway before the first hazard
     MAX_HAZARD_RUN: 5,      // most consecutive non-grass lanes allowed
 
