@@ -464,11 +464,13 @@
 
       var pads = {};
       var mk = function () {
-        return { r: 0.92 + rng() * 0.38, a: rng() * Math.PI * 2, flower: rng() < 0.18 };
+        return { r: 0.86 + rng() * 0.26, a: rng() * Math.PI * 2, flower: rng() < 0.16 };
       };
       for (var d = -1; d <= 1; d++) pads[this.padCorridor + d] = mk();
+      // Sparse extras beyond the guaranteed corridor. Higher than this and the
+      // river stops reading as water you have to cross.
       for (var x = CFG.MIN_X; x <= CFG.MAX_X; x++) {
-        if (!pads[x] && rng() < 0.30) pads[x] = mk();
+        if (!pads[x] && rng() < 0.14) pads[x] = mk();
       }
 
       return {
@@ -1029,7 +1031,7 @@
     var T = View.tile;
     var cx = sx(x), cy = sy(row);
     if (offView(cx)) return;
-    var r = T * 0.40 * pad.r;
+    var r = T * 0.31 * pad.r;
 
     ink(T);
     ctx.fillStyle = PAL.padDark;
@@ -1612,8 +1614,6 @@
 
     // Pass 2 — props and actors, far to near (painter's order), clipped to the
     // playable strip so traffic spawning off-world never draws on the hedge.
-    var playerBucket = Math.round(Player.frow);
-    var ghostBucket = Game.ghost.active ? Math.round(Game.ghost.frow) : null;
     var crossings = [];
 
     ctx.save();
@@ -1648,12 +1648,14 @@
         if (st.active) drawTrain(lane, row, st);
       }
 
-      if (ghostBucket === row) drawGhost();
-      if (playerBucket === row && Game.phase !== 'menu') drawPlayer();
     }
 
-    if (ghostBucket === null || ghostBucket > topRow || ghostBucket < botRow) drawGhost();
-    if (Game.phase !== 'menu' && (playerBucket > topRow || playerBucket < botRow)) drawPlayer();
+    // The rival, then you, over the whole board. Sorting the actors into the
+    // row loop meant a vehicle in the NEXT lane forward drew after the player
+    // and ate its lower half as it slid past — which looks exactly like dying
+    // and then un-dying. The piece you control is never occluded.
+    drawGhost();
+    if (Game.phase !== 'menu') drawPlayer();
 
     ctx.restore(); // release the playfield clip
     ctx.restore(); // release the world tilt
