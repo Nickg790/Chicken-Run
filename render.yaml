@@ -1,0 +1,13 @@
+# Chicken Run — Socket.io game server on Render (free tier).
+# Render reads this file when you "New +" -> "Blueprint" from the repo.
+services:
+  - type: web
+    name: chicken-run-server
+    runtime: node
+    plan: free
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production

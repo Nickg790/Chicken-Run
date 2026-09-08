@@ -1,0 +1,18 @@
+{
+  "name": "chicken-run",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Chicken Run — 1v1 real-time multiplayer mobile web game (Triumph-style head-to-head hopper).",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}
