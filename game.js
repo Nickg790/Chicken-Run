@@ -46,6 +46,7 @@
     MAX_X: 8,
     VIEW_COLS: 7.6,         // tile columns across the viewport (reference scale)
     PLAYER_SCREEN_Y: 0.70,  // player rests this far down the screen
+    CAM_DEADZONE: 1.6,      // tiles you can move sideways before the camera pans
 
     // The board is built axis-aligned and tilted as one unit at draw time.
     // Gameplay never sees this; it is purely how the picture is framed.
@@ -860,21 +861,29 @@
       ctx.fillRect(x0, y, w, T + 1);
       ctx.fillStyle = 'rgba(0,0,0,0.14)';
       ctx.fillRect(x0, y, w, T * 0.07);
+      // Sleepers sit on the WORLD grid, not the screen. Laying them out with a
+      // screen-space modulo made them crawl sideways against the rails as the
+      // camera panned; on a high-contrast repeating stripe that reads as a
+      // moire shimmer, which is what makes the tracks painful to look at.
+      // Anchored to world x they simply translate with everything else.
       ctx.fillStyle = PAL.tie;
-      var step = T * 0.46;
-      var startTie = x0 - mod(sx(0) - x0, step);
-      for (var tx = startTie; tx < x0 + w; tx += step) {
-        rr(ctx, tx, y + T * 0.17, step * 0.56, T * 0.66, T * 0.03);
+      var TIE = 0.58;                                   // world tiles per sleeper
+      var wLeft = (x0 - View.w / 2) / T + Game.cam.x;
+      var wRight = (x0 + w - View.w / 2) / T + Game.cam.x;
+      var tieW = T * TIE * 0.54;
+      for (var ti = Math.floor(wLeft / TIE); ti <= Math.ceil(wRight / TIE); ti++) {
+        rr(ctx, sx(ti * TIE) - tieW / 2, y + T * 0.17, tieW, T * 0.66, T * 0.03);
         ctx.fill();
       }
-      // Rails: dark seat, steel head, bright top highlight
+      // Rails: dark seat, steel head, soft top highlight. A 1px pure-white
+      // line here strobed against the tilt, so it is thicker and dimmer.
       [0.27, 0.64].forEach(function (f) {
-        ctx.fillStyle = 'rgba(0,0,0,0.28)';
+        ctx.fillStyle = 'rgba(0,0,0,0.24)';
         ctx.fillRect(x0, y + T * f + T * 0.055, w, Math.max(1.5, T * 0.030));
         ctx.fillStyle = PAL.steel;
         ctx.fillRect(x0, y + T * f, w, Math.max(2, T * 0.070));
-        ctx.fillStyle = 'rgba(255,255,255,0.55)';
-        ctx.fillRect(x0, y + T * f, w, Math.max(1, T * 0.022));
+        ctx.fillStyle = 'rgba(255,255,255,0.30)';
+        ctx.fillRect(x0, y + T * f, w, Math.max(1.5, T * 0.030));
       });
     } else if (lane.type === 'river') {
       ctx.fillStyle = PAL.water;
@@ -1705,8 +1714,10 @@
     if (Game.phase !== 'playing' || !Player.isRunning()) return;
 
     if (Player.hopping) {
-      // Buffer one input so fast tapping feels responsive rather than dropped.
-      if (Player.hopT > 0.45) Player.queued = { dx: dx, dy: dy };
+      // Always keep the most recent input. This used to ignore anything pressed
+      // during the first 45% of a hop, so tapping quickly silently ate presses
+      // and the chicken appeared to stutter or skip a move.
+      Player.queued = { dx: dx, dy: dy };
       return;
     }
 
@@ -1726,6 +1737,12 @@
 
     // Trees are solid.
     if (destLane.type === 'grass' && destLane.trees[Math.round(targetX)]) return;
+
+    // A hop that cannot actually move you — pressing into the field edge, or
+    // back past the start line — must not consume a hop cycle. It used to run
+    // the full 120ms animation in place, which swallowed whatever you pressed
+    // next and made mashing at the edge feel like the game had frozen.
+    if (targetRow === Math.round(Player.row) && Math.abs(targetX - baseX) < 1e-9) return;
 
     Player.fromX = Player.x; Player.fromRow = Player.row;
     Player.toX = targetX; Player.toRow = targetRow;
@@ -1930,10 +1947,19 @@
       }
       var targetRow = followRow + 0.35;
       var camReach = Math.max(0, CFG.MAX_X - (View.w / 2) / View.tile + 0.9);
-      var targetX = clamp(followX, -camReach, camReach);
-      var k = 1 - Math.pow(0.0016, dt);
-      Game.cam.row = lerp(Game.cam.row, targetRow, k);
-      Game.cam.x = lerp(Game.cam.x, targetX, k);
+
+      // Horizontal dead zone. Following every sideways hop dragged the whole
+      // tilted board across the screen, and that sliding is most of why moving
+      // side to side felt disorienting. The camera now holds still until you
+      // get near the edge of its window, then glides rather than snaps.
+      var want = Game.cam.x;
+      var off = followX - Game.cam.x;
+      if (off > CFG.CAM_DEADZONE) want = followX - CFG.CAM_DEADZONE;
+      else if (off < -CFG.CAM_DEADZONE) want = followX + CFG.CAM_DEADZONE;
+      var targetX = clamp(want, -camReach, camReach);
+
+      Game.cam.row = lerp(Game.cam.row, targetRow, 1 - Math.pow(0.0009, dt));
+      Game.cam.x = lerp(Game.cam.x, targetX, 1 - Math.pow(0.03, dt));
     }
 
     // Ghost interpolation.
