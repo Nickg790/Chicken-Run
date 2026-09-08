@@ -27,7 +27,7 @@
    * different hosts. Locally everything comes from the one Express process.
    *   -> Replace the onrender.com URL below with your Render service URL.
    */
-  var RENDER_URL = 'https://YOUR-RENDER-APP.onrender.com';
+  var RENDER_URL = 'https://chicken-run-server.onrender.com';
   var SOCKET_URL = (function () {
     var h = window.location.hostname;
     if (h === 'localhost' || h === '127.0.0.1' || h === '') return 'http://localhost:3000';
