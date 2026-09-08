@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Chicken Run" />
+<meta name="theme-color" content="#0a0f16" />
+<meta name="format-detection" content="telephone=no" />
+<meta name="color-scheme" content="dark only" />
+<title>Chicken Run</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div id="stage">
+  <canvas id="game" aria-label="Chicken Run game board"></canvas>
+
+  <!-- ================= IN-GAME HUD (score plate + rival) ================= -->
+  <div id="hud" class="hidden" aria-live="polite">
+    <div class="score-plate" id="score-plate">
+      <div class="score-value" id="pending-value">0</div>
+    </div>
+    <div class="rival-pill hidden" id="rival-track">
+      <span class="rt-dot" id="rt-dot"></span>
+      <span class="rt-name" id="rt-name">RIVAL</span>
+      <span class="rt-value" id="rt-value">0</span>
+    </div>
+  </div>
+
+  <!-- ================= CASH OUT (egg button, bottom-right) ============== -->
+  <div id="cashout-wrap" class="hidden">
+    <button id="btn-cashout" class="cashout-btn" disabled aria-label="Cash out">
+      <span class="egg-disc"><span class="egg"></span></span>
+      <span class="cashout-label" id="cashout-label">CASH<br />OUT</span>
+    </button>
+  </div>
+
+  <!-- ================= COUNTDOWN ================= -->
+  <div id="countdown" class="overlay hidden">
+    <div class="count-num" id="count-num">3</div>
+    <div class="count-sub" id="count-sub">GET READY</div>
+    <div class="count-hint">TAP TO HOP &nbsp;•&nbsp; SWIPE TO STEER &nbsp;•&nbsp; TAP THE EGG TO BANK</div>
+  </div>
+
+  <!-- ================= MENU ================= -->
+  <div id="screen-menu" class="overlay screen">
+    <div class="logo">
+      <div class="logo-chick">🐔</div>
+      <h1>CHICKEN<span>RUN</span></h1>
+      <p class="tagline">HOP FAR &nbsp;•&nbsp; BANK IT &nbsp;•&nbsp; BEAT YOUR RIVAL</p>
+    </div>
+
+    <div class="h2h-strip" id="menu-h2h">
+      <div class="h2h-line">
+        <span class="h2h-you" id="menu-h2h-you">YOU</span>
+        <span class="h2h-score" id="menu-h2h-score">0 - 0</span>
+        <span class="h2h-rival" id="menu-h2h-rival">RIVAL</span>
+      </div>
+      <div class="h2h-sub" id="menu-h2h-sub">NO MATCHES PLAYED YET</div>
+    </div>
+
+    <input id="name-input" class="name-input" type="text" inputmode="latin"
+           autocomplete="off" autocorrect="off" autocapitalize="characters"
+           spellcheck="false" maxlength="12" placeholder="YOUR NAME" aria-label="Your name" />
+
+    <div class="menu-buttons">
+      <button class="btn btn-primary" id="btn-create">CREATE MATCH</button>
+      <button class="btn btn-secondary" id="btn-join-screen">JOIN MATCH</button>
+      <button class="btn btn-ghost" id="btn-solo">PRACTICE SOLO</button>
+    </div>
+    <div class="conn-state" id="conn-state">CONNECTING…</div>
+    <button class="sound-toggle" id="btn-sound" aria-label="Toggle sound">🔊</button>
+  </div>
+
+  <!-- ================= JOIN ================= -->
+  <div id="screen-join" class="overlay screen hidden">
+    <h2 class="panel-title">ENTER ROOM CODE</h2>
+    <input id="code-input" class="code-input" type="text" inputmode="latin"
+           autocomplete="off" autocorrect="off" autocapitalize="characters"
+           spellcheck="false" maxlength="4" placeholder="ABCD" aria-label="Room code" />
+    <div class="join-error" id="join-error"></div>
+    <div class="menu-buttons">
+      <button class="btn btn-primary" id="btn-join">JOIN</button>
+      <button class="btn btn-ghost" id="btn-join-back">BACK</button>
+    </div>
+  </div>
+
+  <!-- ================= LOBBY ================= -->
+  <div id="screen-lobby" class="overlay screen hidden">
+    <h2 class="panel-title">MATCH CODE</h2>
+    <div class="code-display" id="code-display">----</div>
+    <p class="lobby-hint">Share this code with your rival.<br />The match starts the second they join.</p>
+    <div class="waiting-dots"><i></i><i></i><i></i></div>
+
+    <div class="h2h-strip" id="lobby-h2h">
+      <div class="h2h-line">
+        <span class="h2h-you" id="lobby-h2h-you">YOU</span>
+        <span class="h2h-score" id="lobby-h2h-score">0 - 0</span>
+        <span class="h2h-rival" id="lobby-h2h-rival">RIVAL</span>
+      </div>
+      <div class="h2h-sub" id="lobby-h2h-sub">LIFETIME RECORD</div>
+    </div>
+
+    <div class="menu-buttons">
+      <button class="btn btn-secondary" id="btn-copy">COPY CODE</button>
+      <button class="btn btn-ghost" id="btn-lobby-back">CANCEL</button>
+    </div>
+  </div>
+
+  <!-- ================= MATCH END ================= -->
+  <div id="screen-end" class="overlay screen hidden">
+    <div class="result-banner" id="result-banner">VICTORY</div>
+    <div class="result-reason" id="result-reason"></div>
+
+    <div class="h2h">
+      <div class="h2h-col h2h-col-you">
+        <div class="avatar big" id="end-you-avatar"><span>🐔</span></div>
+        <div class="h2h-name" id="end-you-name">YOU</div>
+        <div class="h2h-bank" id="end-you-score">0</div>
+        <div class="h2h-fate" id="end-you-fate">BANKED</div>
+      </div>
+      <div class="h2h-vs">VS</div>
+      <div class="h2h-col h2h-col-opp">
+        <div class="avatar big avatar-opp" id="end-opp-avatar"><span>🐔</span></div>
+        <div class="h2h-name" id="end-opp-name">RIVAL</div>
+        <div class="h2h-bank" id="end-opp-score">0</div>
+        <div class="h2h-fate" id="end-opp-fate">BANKED</div>
+      </div>
+    </div>
+
+    <div class="h2h-strip" id="end-h2h">
+      <div class="h2h-line">
+        <span class="h2h-you" id="end-h2h-you">YOU</span>
+        <span class="h2h-score" id="end-h2h-score">0 - 0</span>
+        <span class="h2h-rival" id="end-h2h-rival">RIVAL</span>
+      </div>
+      <div class="h2h-sub" id="end-h2h-sub">LIFETIME RECORD</div>
+    </div>
+
+    <div class="stat-row">
+      <div class="stat"><span id="end-tiles">0</span><label>TILES REACHED</label></div>
+      <div class="stat"><span id="end-best">0</span><label>ALL-TIME BEST</label></div>
+    </div>
+
+    <div class="menu-buttons">
+      <button class="btn btn-primary" id="btn-again">PLAY AGAIN</button>
+      <button class="btn btn-ghost" id="btn-exit">MAIN MENU</button>
+    </div>
+    <div class="rematch-note hidden" id="rematch-note">WAITING FOR RIVAL…</div>
+  </div>
+
+  <div id="toast" class="hidden"></div>
+</div>
+
+<!-- Socket.io client from the official CDN so the static site never depends on
+     the game server's origin for its own script. -->
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"
+        crossorigin="anonymous"></script>
+<script src="game.js"></script>
+</body>
+</html>
