@@ -75,10 +75,10 @@
     ballast: '#9c9287', tie: '#8f6b41', steel: '#ccd3d9',
     water: '#5cc9f0', waterDeep: '#3fb0e0',
     log: '#b7793f', logDark: '#8a5528', logHi: '#cd9457', logRing: '#d9a86c', logCore: '#a06a38',
-    tree: '#7fcc44', treeDark: '#4f9d31', treeHi: '#a6e06a', treeTop: '#95dc55',
-    trunk: '#8c5a35',
-    bush: '#79c243', bushDark: '#5aa032', bushHi: '#95d45a',
-    rock: '#aeb6bd', rockDark: '#8c959d', rockHi: '#d2d9de',
+    tree: '#6fbe3a', treeDark: '#4a9330', treeHi: '#a6e06a', treeTop: '#93d94f',
+    trunk: '#8c5a35', trunkHi: '#a5734a',
+    bush: '#6cb93c', bushDark: '#519629', bushHi: '#8fd253',
+    rock: '#a6afb7', rockDark: '#848e97', rockHi: '#cdd5db',
     pad: '#5db547', padDark: '#43922f', padHi: '#8ad46a',
     flower: '#f7a8c8', flowerMid: '#ffd75e',
     glass: '#c7ecf7', cargo: '#f3ece0',
@@ -903,20 +903,27 @@
   /* Props                                                                   */
   /* ---------------------------------------------------------------------- */
 
-  function drawEdgeBushes(row) {
-    var T = View.tile;
-    var y = sy(row);
-    [CFG.MIN_X - 1.6, CFG.MAX_X + 1.6].forEach(function (x) {
-      var cx = sx(x);
-      if (offView(cx)) return;
-      drawShadow(cx, y + T * 0.28, T * 0.38, T * 0.15, 0.18);
-      upright(cx, y, function () {
-        ctx.fillStyle = PAL.bushDark;
-        rr(ctx, cx - T * 0.40, y - T * 0.24, T * 0.80, T * 0.56, T * 0.26); ctx.fill();
-        ctx.fillStyle = PAL.bushHi;
-        rr(ctx, cx - T * 0.34, y - T * 0.30, T * 0.68, T * 0.40, T * 0.20); ctx.fill();
-      });
-    });
+  /**
+   * The single most important shape in this art style: a rounded block with a
+   * distinctly LIGHTER top face sitting on a darker body. Every prop in the
+   * reference is built from it, and it is what makes the board read as solid
+   * geometry instead of flat stickers with gradients on them.
+   *
+   *   gy = ground line, w = width, d = depth of the visible top face,
+   *   h = how tall the body stands.
+   */
+  function isoBlock(cx, gy, w, d, h, topCol, sideCol, r, skirtCol) {
+    var top = gy - h - d;
+    ctx.fillStyle = sideCol;
+    rr(ctx, cx - w / 2, top, w, h + d, r); ctx.fill();
+    if (skirtCol) {                       // darker band along the very bottom
+      ctx.fillStyle = skirtCol;
+      rr(ctx, cx - w / 2, top + (h + d) * 0.62, w, (h + d) * 0.38, r); ctx.fill();
+    }
+    ctx.fillStyle = topCol;
+    rr(ctx, cx - w / 2, top, w, d, r); ctx.fill();
+    rr(ctx, cx - w / 2, top, w, h + d, r); ctx.stroke();
+    return top;
   }
 
   /** Trees and rocks share the tile-blocking role, so they share a slot. */
@@ -930,41 +937,52 @@
     });
   }
 
-  /** Rounded-cube canopy on a stubby trunk — the reference's low-poly tree. */
   function drawTree(cx, cy, T, s) {
-    var w = T * 0.74 * s, h = T * 0.66 * s;
-    var top = cy - T * 0.30 - h * 0.72;
-    drawShadow(cx + T * 0.06, cy + T * 0.27, w * 0.52, T * 0.12, 0.20);
+    var w = T * 0.72 * s;
+    var d = T * 0.40 * s;
+    var h = T * 0.30 * s;
+    drawShadow(cx + T * 0.07, cy + T * 0.24, w * 0.52, T * 0.11, 0.20);
 
     ink(T);
+    // Trunk first, so the canopy closes over it
     ctx.fillStyle = PAL.trunk;
-    rr(ctx, cx - T * 0.075, cy - T * 0.04, T * 0.15, T * 0.36, T * 0.04);
+    rr(ctx, cx - T * 0.075, cy - T * 0.20, T * 0.15, T * 0.30, T * 0.04);
     ctx.fill(); ctx.stroke();
+    ctx.fillStyle = PAL.trunkHi;
+    rr(ctx, cx - T * 0.075, cy - T * 0.20, T * 0.055, T * 0.30, T * 0.03); ctx.fill();
 
-    var cg = ctx.createLinearGradient(0, top, 0, top + h * 1.18);
-    cg.addColorStop(0, PAL.treeHi);
-    cg.addColorStop(0.42, PAL.tree);
-    cg.addColorStop(1, PAL.treeDark);
-    ctx.fillStyle = cg;
-    rr(ctx, cx - w / 2, top, w, h * 1.18, w * 0.30); ctx.fill(); ctx.stroke();
-    // Lit top face — the cue that makes the canopy read as a solid block
-    ctx.fillStyle = PAL.treeTop;
-    rr(ctx, cx - w * 0.40, top + h * 0.04, w * 0.80, h * 0.34, w * 0.22); ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.22)';
-    rr(ctx, cx - w * 0.30, top + h * 0.09, w * 0.36, h * 0.15, w * 0.10); ctx.fill();
+    var top = isoBlock(cx, cy - T * 0.20, w, d, h,
+                       PAL.treeTop, PAL.tree, w * 0.28, PAL.treeDark);
+    // Sun catch on the top face
+    ctx.fillStyle = 'rgba(255,255,255,0.24)';
+    rr(ctx, cx - w * 0.30, top + d * 0.16, w * 0.34, d * 0.36, w * 0.12); ctx.fill();
   }
 
   function drawRock(cx, cy, T, s) {
-    var w = T * 0.66 * s, h = T * 0.50 * s;
-    var top = cy - T * 0.06 - h * 0.62;
-    drawShadow(cx + T * 0.05, cy + T * 0.24, w * 0.50, T * 0.11, 0.20);
+    var w = T * 0.60 * s;
+    var d = T * 0.30 * s;
+    var h = T * 0.16 * s;
+    drawShadow(cx + T * 0.05, cy + T * 0.20, w * 0.52, T * 0.10, 0.20);
     ink(T);
-    var rg = ctx.createLinearGradient(0, top, 0, top + h * 1.10);
-    rg.addColorStop(0, PAL.rockHi);
-    rg.addColorStop(0.45, PAL.rock);
-    rg.addColorStop(1, PAL.rockDark);
-    ctx.fillStyle = rg;
-    rr(ctx, cx - w / 2, top, w, h * 1.10, w * 0.34); ctx.fill(); ctx.stroke();
+    var top = isoBlock(cx, cy + T * 0.02, w, d, h,
+                       PAL.rockHi, PAL.rock, w * 0.34, PAL.rockDark);
+    ctx.fillStyle = 'rgba(255,255,255,0.28)';
+    rr(ctx, cx - w * 0.26, top + d * 0.18, w * 0.30, d * 0.34, w * 0.14); ctx.fill();
+  }
+
+  function drawEdgeBushes(row) {
+    var T = View.tile;
+    var y = sy(row);
+    [CFG.MIN_X - 1.6, CFG.MAX_X + 1.6].forEach(function (x) {
+      var cx = sx(x);
+      if (offView(cx)) return;
+      drawShadow(cx, y + T * 0.26, T * 0.40, T * 0.13, 0.18);
+      upright(cx, y, function () {
+        ink(T);
+        isoBlock(cx, y + T * 0.10, T * 0.82, T * 0.36, T * 0.26,
+                 PAL.bushHi, PAL.bush, T * 0.26, PAL.bushDark);
+      });
+    });
   }
 
   /**
@@ -994,7 +1012,6 @@
     ctx.closePath();
     ctx.fill();
 
-    // Ink the pad rim (minus the notch) so it sits in the water like the props do
     ctx.beginPath();
     ctx.arc(cx, cy, r, pad.a + 0.33, pad.a - 0.33 + Math.PI * 2);
     ctx.stroke();
@@ -1012,10 +1029,9 @@
   }
 
   /**
-   * Vehicles. The cabin OVERLAPS the body rather than stacking on top of it —
-   * floated clear it reads as two unrelated boxes instead of one car. Buses get
-   * no cabin at all: they're a single tall body with a window strip, which is
-   * what a bus actually looks like from above.
+   * Vehicles, built as a stack of faces the way the reference draws them:
+   * roof (lightest) → glass band → body flank → dark sill, with wheels poking
+   * out below and lamps on the leading face.
    */
   function drawVehicle(lane, cx, row) {
     var T = View.tile;
@@ -1026,122 +1042,90 @@
     var y = sy(row);
     var flip = lane.dir < 0;
     var base = lane.itemColor;
-    var skirt = shade(base, 0.70);
-    var roofC = shade(base, 1.16);
+    var roofC = shade(base, 1.20);
+    var sill = shade(base, 0.62);
     var isBus = lane.vType === 'bus', isTruck = lane.vType === 'truck';
 
-    drawShadow(cx + T * 0.04, y + T * 0.30, len * 0.46, T * 0.13, 0.22);
+    drawShadow(cx + T * 0.05, y + T * 0.28, len * 0.46, T * 0.12, 0.22);
 
     ctx.save();
     var uk = 1 / CFG.WORLD_SQUASH;
     ctx.translate(cx, y); ctx.scale(1, uk); ctx.translate(-cx, -y);
     ink(T);
 
-    // Exhaust puff behind the tailpipe
+    // Exhaust puff off the tail
     var puffX = flip ? x + len + T * 0.09 : x - T * 0.09;
-    ctx.fillStyle = 'rgba(230,238,245,0.5)';
-    ellipse(ctx, puffX, y + T * 0.10, T * 0.095, T * 0.070); ctx.fill();
-    ellipse(ctx, puffX + (flip ? T * 0.15 : -T * 0.15), y + T * 0.05, T * 0.06, T * 0.045);
+    ctx.fillStyle = 'rgba(228,236,244,0.55)';
+    ellipse(ctx, puffX, y + T * 0.09, T * 0.085, T * 0.065); ctx.fill();
+    ellipse(ctx, puffX + (flip ? T * 0.14 : -T * 0.14), y + T * 0.03, T * 0.055, T * 0.042);
     ctx.fill();
 
-    var bodyH = T * (isBus ? 0.62 : isTruck ? 0.50 : 0.46);
-    var bodyTop = y + T * 0.14 - bodyH;      // body sits on the ground line
-
-    // Wheels first, so the body sits over their tops
-    var wy = y + T * 0.02;
-    var ww = len * 0.155, wh = T * 0.19;
-    var axles = isTruck ? [0.06, 0.58, 0.79] : isBus ? [0.08, 0.77] : [0.11, 0.70];
+    // Wheels
+    var wy = y - T * 0.02;
+    var ww = len * 0.16, wh = T * 0.20;
+    var axles = isTruck ? [0.05, 0.58, 0.80] : isBus ? [0.07, 0.78] : [0.10, 0.71];
     axles.forEach(function (f) {
       var wx = x + len * f;
-      ctx.fillStyle = '#242a30';
-      rr(ctx, wx, wy, ww, wh, wh * 0.42); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#b6bec6';
-      rr(ctx, wx + ww * 0.29, wy + wh * 0.30, ww * 0.42, wh * 0.38, wh * 0.17); ctx.fill();
+      ctx.fillStyle = '#232930';
+      rr(ctx, wx, wy, ww, wh, wh * 0.44); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#c3cad1';
+      rr(ctx, wx + ww * 0.30, wy + wh * 0.30, ww * 0.40, wh * 0.38, wh * 0.18); ctx.fill();
     });
 
+    var gy = y + T * 0.08;                 // where the vehicle meets the road
+
     if (isTruck) {
-      // Cargo box + short cab, both grounded on the chassis
       var boxW = len * 0.58, cabW = len * 0.36;
       var boxX = flip ? x + len - boxW : x;
       var cabX = flip ? x : x + len - cabW;
-      var boxTop = bodyTop - bodyH * 0.62;
 
-      ctx.fillStyle = skirt;
-      rr(ctx, x, bodyTop + bodyH * 0.42, len, bodyH * 0.66, T * 0.10); ctx.fill();
-
-      // Cab
-      ctx.fillStyle = base;
-      rr(ctx, cabX, bodyTop - bodyH * 0.30, cabW, bodyH * 1.34, T * 0.11); ctx.fill();
-      ctx.fillStyle = roofC;
-      rr(ctx, cabX + T * 0.04, bodyTop - bodyH * 0.26, cabW - T * 0.08, bodyH * 0.40, T * 0.08);
-      ctx.fill();
-      rr(ctx, cabX, bodyTop - bodyH * 0.30, cabW, bodyH * 1.34, T * 0.11); ctx.stroke();
+      // Cab: coloured block with glass on its front face
+      var cabTop = isoBlock(cabX + cabW / 2, gy, cabW, T * 0.22, T * 0.44,
+                            roofC, base, T * 0.11, sill);
       ctx.fillStyle = PAL.glass;
-      rr(ctx, cabX + cabW * (flip ? 0.12 : 0.26), bodyTop + bodyH * 0.16,
-         cabW * 0.62, bodyH * 0.50, T * 0.05);
+      rr(ctx, cabX + cabW * (flip ? 0.12 : 0.26), cabTop + T * 0.27,
+         cabW * 0.62, T * 0.23, T * 0.05);
       ctx.fill(); ctx.stroke();
 
-      // Cargo box, taller than the cab
-      ctx.fillStyle = shade(PAL.cargo, 0.84);
-      rr(ctx, boxX, boxTop, boxW, bodyH * 1.66, T * 0.07); ctx.fill();
-      ctx.fillStyle = PAL.cargo;
-      rr(ctx, boxX, boxTop, boxW, bodyH * 1.30, T * 0.07); ctx.fill();
-      ctx.fillStyle = '#ffffff';
-      rr(ctx, boxX + T * 0.05, boxTop + T * 0.04, boxW - T * 0.10, bodyH * 0.34, T * 0.05);
-      ctx.fill();
-      rr(ctx, boxX, boxTop, boxW, bodyH * 1.66, T * 0.07); ctx.stroke();
+      // Cargo box: taller cream block
+      var boxTop = isoBlock(boxX + boxW / 2, gy, boxW, T * 0.26, T * 0.60,
+                            '#ffffff', PAL.cargo, T * 0.08, shade(PAL.cargo, 0.80));
+      ctx.beginPath();                      // rear door seam
+      ctx.moveTo(flip ? boxX + boxW * 0.07 : boxX + boxW * 0.93, boxTop + T * 0.30);
+      ctx.lineTo(flip ? boxX + boxW * 0.07 : boxX + boxW * 0.93, boxTop + T * 0.80);
+      ctx.stroke();
     } else if (isBus) {
-      // One tall body, window strip down the flank
-      ctx.fillStyle = skirt;
-      rr(ctx, x, bodyTop + bodyH * 0.46, len, bodyH * 0.62, T * 0.12); ctx.fill();
-      ctx.fillStyle = base;
-      rr(ctx, x, bodyTop, len, bodyH * 1.02, T * 0.12); ctx.fill();
-      ctx.fillStyle = roofC;
-      rr(ctx, x + T * 0.05, bodyTop + T * 0.03, len - T * 0.10, bodyH * 0.28, T * 0.09);
-      ctx.fill();
-      rr(ctx, x, bodyTop, len, bodyH * 1.02, T * 0.12); ctx.stroke();
-
+      var busTop = isoBlock(cx, gy, len, T * 0.28, T * 0.56, roofC, base, T * 0.13, sill);
       ctx.fillStyle = PAL.glass;
       for (var i = 0; i < 5; i++) {
-        rr(ctx, x + len * (0.07 + i * 0.175), bodyTop + bodyH * 0.34,
-           len * 0.13, bodyH * 0.36, T * 0.035);
+        rr(ctx, x + len * (0.07 + i * 0.176), busTop + T * 0.36, len * 0.13, T * 0.24, T * 0.04);
         ctx.fill(); ctx.stroke();
       }
     } else {
-      // Car: body, then a cabin that sinks into it
-      var ghW = len * 0.66;
-      var ghX = x + (len - ghW) / 2 + (flip ? -len * 0.04 : len * 0.04);
-      var ghH = bodyH * 0.86;
-      var ghTop = bodyTop - ghH * 0.44;      // ~56% of the cabin is inside the body
+      // Chassis, then a narrower cabin block seated on it
+      var chTop = isoBlock(cx, gy, len, T * 0.20, T * 0.30, shade(base, 1.06), base, T * 0.14, sill);
+      var ghW = len * 0.64;
+      var ghX = x + (len - ghW) / 2 + (flip ? -len * 0.05 : len * 0.05);
+      var ghTop = isoBlock(ghX + ghW / 2, chTop + T * 0.13, ghW, T * 0.20, T * 0.28,
+                           roofC, shade(base, 1.04), T * 0.11, null);
 
-      ctx.fillStyle = skirt;
-      rr(ctx, x, bodyTop + bodyH * 0.44, len, bodyH * 0.64, T * 0.13); ctx.fill();
-
-      // Cabin first so the body's outline closes over its base
-      ctx.fillStyle = roofC;
-      rr(ctx, ghX, ghTop, ghW, ghH * 1.30, T * 0.11); ctx.fill();
-      rr(ctx, ghX, ghTop, ghW, ghH * 1.30, T * 0.11); ctx.stroke();
-
-      ctx.fillStyle = base;
-      rr(ctx, x, bodyTop, len, bodyH * 1.00, T * 0.13); ctx.fill();
-      rr(ctx, x, bodyTop, len, bodyH * 1.00, T * 0.13); ctx.stroke();
-
-      // Glass sits in the exposed part of the cabin
-      var gy = ghTop + ghH * 0.20, gh2 = ghH * 0.46;
+      // Glass band across the cabin's front face
       ctx.fillStyle = PAL.glass;
-      rr(ctx, ghX + ghW * 0.07, gy, ghW * 0.39, gh2, T * 0.045); ctx.fill(); ctx.stroke();
-      rr(ctx, ghX + ghW * 0.54, gy, ghW * 0.39, gh2, T * 0.045); ctx.fill(); ctx.stroke();
+      rr(ctx, ghX + ghW * 0.07, ghTop + T * 0.235, ghW * 0.39, T * 0.215, T * 0.045);
+      ctx.fill(); ctx.stroke();
+      rr(ctx, ghX + ghW * 0.54, ghTop + T * 0.235, ghW * 0.39, T * 0.215, T * 0.045);
+      ctx.fill(); ctx.stroke();
       ctx.fillStyle = 'rgba(255,255,255,0.55)';
-      rr(ctx, ghX + ghW * 0.10, gy + gh2 * 0.14, ghW * 0.13, gh2 * 0.56, T * 0.03); ctx.fill();
+      rr(ctx, ghX + ghW * 0.10, ghTop + T * 0.255, ghW * 0.13, T * 0.16, T * 0.03); ctx.fill();
     }
 
-    // Lamps
-    var frontX = flip ? x + len * 0.05 : x + len * 0.95;
-    var backX = flip ? x + len * 0.95 : x + len * 0.05;
+    // Lamps on the leading face
+    var frontX = flip ? x + len * 0.055 : x + len * 0.945;
+    var backX = flip ? x + len * 0.945 : x + len * 0.055;
     ctx.fillStyle = '#fff8d4';
-    ellipse(ctx, frontX, bodyTop + bodyH * 0.62, T * 0.045, T * 0.045); ctx.fill(); ctx.stroke();
+    ellipse(ctx, frontX, gy - T * 0.14, T * 0.045, T * 0.045); ctx.fill(); ctx.stroke();
     ctx.fillStyle = '#ff6b5c';
-    rr(ctx, backX - T * 0.028, bodyTop + bodyH * 0.50, T * 0.056, T * 0.095, T * 0.02);
+    rr(ctx, backX - T * 0.028, gy - T * 0.20, T * 0.056, T * 0.09, T * 0.02);
     ctx.fill(); ctx.stroke();
 
     ctx.restore();
