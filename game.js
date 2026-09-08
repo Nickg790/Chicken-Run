@@ -27,7 +27,7 @@
    * different hosts. Locally everything comes from the one Express process.
    *   -> Replace the onrender.com URL below with your Render service URL.
    */
-  var RENDER_URL = 'https://YOUR-RENDER-APP.onrender.com';
+  var RENDER_URL = 'https://chicken-run-server.onrender.com';
   var SOCKET_URL = (function () {
     var h = window.location.hostname;
     if (h === 'localhost' || h === '127.0.0.1' || h === '') return 'http://localhost:3000';
@@ -49,8 +49,8 @@
 
     // The board is built axis-aligned and tilted as one unit at draw time.
     // Gameplay never sees this; it is purely how the picture is framed.
-    WORLD_ANGLE: 0.255,     // ~14.6 deg, lanes running DOWN to the right
-    WORLD_SQUASH: 1.0,      // rows and columns share a pitch, like the reference
+    WORLD_ANGLE: 0.175,     // ~10 deg, lanes running DOWN to the right
+    WORLD_SQUASH: 0.90,     // rows sit closer than columns => camera behind/above
     SAFE_ROWS: 4,           // grass runway before the first hazard
     MAX_HAZARD_RUN: 5,      // most consecutive non-grass lanes allowed
 
@@ -62,7 +62,6 @@
     TRAIN_WARN: 1.2,        // seconds of flashing red before the train arrives
     TRAIN_SWEEP: 0.5,       // seconds for the train to cross the screen
     TRAIN_LEN: 15,
-    NEAR_MISS: 1.30,        // tiles — closer than this (without dying) = whew
     SPAWN_L: -16,           // obstacle wrap window (wider than the world)
     SPAWN_R: 16
   };
@@ -73,10 +72,10 @@
     grassA: '#9ed44e', grassB: '#8fca45', grassEdge: '#7a6a3a',
     bank: '#8c6f43', bankDark: '#6b5232',
     road: '#7e858c', roadB: '#767d84', roadEdge: '#9ca4ab',
-    ballast: '#665a4f', tie: '#5a4632', steel: '#a9b1b8',
+    ballast: '#9c9287', tie: '#8f6b41', steel: '#ccd3d9',
     water: '#5cc9f0', waterDeep: '#3fb0e0',
     log: '#b7793f', logDark: '#8a5528', logHi: '#cd9457', logRing: '#d9a86c', logCore: '#a06a38',
-    tree: '#7fcc44', treeDark: '#4f9d31', treeHi: '#a6e06a',
+    tree: '#7fcc44', treeDark: '#4f9d31', treeHi: '#a6e06a', treeTop: '#95dc55',
     trunk: '#8c5a35',
     bush: '#79c243', bushDark: '#5aa032', bushHi: '#95d45a',
     rock: '#aeb6bd', rockDark: '#8c959d', rockHi: '#d2d9de',
@@ -248,7 +247,6 @@
 
     hop:   function () { this.blip(520, 0.07, 'square', 0.030, 700); },
     ping:  function () { this.blip(880, 0.10, 'triangle', 0.055, 1320); },
-    near:  function () { this.blip(300, 0.09, 'sawtooth', 0.030, 190); },
     death: function () { this.blip(220, 0.34, 'sawtooth', 0.070, 60); },
     cash:  function () {
       var self = this;
@@ -581,7 +579,6 @@
     myName: 'YOU',
     rivalName: 'RIVAL',
     trainAlerted: {},
-    nearFlags: {},
     resolveAt: 0
   };
 
@@ -770,6 +767,23 @@
 
   function offView(cx) { return cx < View.cullL || cx > View.cullR; }
 
+  /**
+   * The board tilt squashes rows to fake a camera above and behind. Ground
+   * markings should compress with it, but anything STANDING on the ground —
+   * a car, a tree, the chicken — must not, or it reads as a flat sticker.
+   * Draw those inside upright(): it pre-stretches by 1/squash about the
+   * object's ground point so the global squash lands it back at true height.
+   */
+  function upright(gx, gy, fn) {
+    var k = 1 / CFG.WORLD_SQUASH;
+    ctx.save();
+    ctx.translate(gx, gy);
+    ctx.scale(1, k);
+    ctx.translate(-gx, -gy);
+    fn();
+    ctx.restore();
+  }
+
   /* ---------------------------------------------------------------------- */
   /* Lane surfaces                                                           */
   /* ---------------------------------------------------------------------- */
@@ -816,12 +830,15 @@
         rr(ctx, tx, y + T * 0.17, step * 0.56, T * 0.66, T * 0.03);
         ctx.fill();
       }
-      ctx.fillStyle = PAL.steel;
-      ctx.fillRect(x0, y + T * 0.27, w, Math.max(2, T * 0.075));
-      ctx.fillRect(x0, y + T * 0.66, w, Math.max(2, T * 0.075));
-      ctx.fillStyle = 'rgba(255,255,255,0.32)';
-      ctx.fillRect(x0, y + T * 0.27, w, Math.max(1, T * 0.022));
-      ctx.fillRect(x0, y + T * 0.66, w, Math.max(1, T * 0.022));
+      // Rails: dark seat, steel head, bright top highlight
+      [0.27, 0.64].forEach(function (f) {
+        ctx.fillStyle = 'rgba(0,0,0,0.28)';
+        ctx.fillRect(x0, y + T * f + T * 0.055, w, Math.max(1.5, T * 0.030));
+        ctx.fillStyle = PAL.steel;
+        ctx.fillRect(x0, y + T * f, w, Math.max(2, T * 0.070));
+        ctx.fillStyle = 'rgba(255,255,255,0.55)';
+        ctx.fillRect(x0, y + T * f, w, Math.max(1, T * 0.022));
+      });
     } else if (lane.type === 'river') {
       ctx.fillStyle = PAL.water;
       ctx.fillRect(x0, y, w, T + 1);
@@ -893,10 +910,12 @@
       var cx = sx(x);
       if (offView(cx)) return;
       drawShadow(cx, y + T * 0.28, T * 0.38, T * 0.15, 0.18);
-      ctx.fillStyle = PAL.bushDark;
-      rr(ctx, cx - T * 0.40, y - T * 0.24, T * 0.80, T * 0.56, T * 0.26); ctx.fill();
-      ctx.fillStyle = PAL.bushHi;
-      rr(ctx, cx - T * 0.34, y - T * 0.30, T * 0.68, T * 0.40, T * 0.20); ctx.fill();
+      upright(cx, y, function () {
+        ctx.fillStyle = PAL.bushDark;
+        rr(ctx, cx - T * 0.40, y - T * 0.24, T * 0.80, T * 0.56, T * 0.26); ctx.fill();
+        ctx.fillStyle = PAL.bushHi;
+        rr(ctx, cx - T * 0.34, y - T * 0.30, T * 0.68, T * 0.40, T * 0.20); ctx.fill();
+      });
     });
   }
 
@@ -905,8 +924,10 @@
     var T = View.tile;
     var cx = sx(x), cy = sy(row);
     if (offView(cx)) return;
-    if (info.rock) drawRock(cx, cy, T, info.s);
-    else drawTree(cx, cy, T, info.s);
+    upright(cx, cy, function () {
+      if (info.rock) drawRock(cx, cy, T, info.s);
+      else drawTree(cx, cy, T, info.s);
+    });
   }
 
   /** Rounded-cube canopy on a stubby trunk — the reference's low-poly tree. */
@@ -920,13 +941,17 @@
     rr(ctx, cx - T * 0.075, cy - T * 0.04, T * 0.15, T * 0.36, T * 0.04);
     ctx.fill(); ctx.stroke();
 
-    ctx.fillStyle = PAL.treeDark;
-    rr(ctx, cx - w / 2, top, w, h * 1.22, w * 0.24); ctx.fill();
-    ctx.fillStyle = PAL.tree;
-    rr(ctx, cx - w / 2, top, w, h * 0.80, w * 0.24); ctx.fill();
-    ctx.fillStyle = PAL.treeHi;
-    rr(ctx, cx - w * 0.36, top + h * 0.08, w * 0.50, h * 0.22, w * 0.12); ctx.fill();
-    rr(ctx, cx - w / 2, top, w, h * 1.22, w * 0.24); ctx.stroke();
+    var cg = ctx.createLinearGradient(0, top, 0, top + h * 1.18);
+    cg.addColorStop(0, PAL.treeHi);
+    cg.addColorStop(0.42, PAL.tree);
+    cg.addColorStop(1, PAL.treeDark);
+    ctx.fillStyle = cg;
+    rr(ctx, cx - w / 2, top, w, h * 1.18, w * 0.30); ctx.fill(); ctx.stroke();
+    // Lit top face — the cue that makes the canopy read as a solid block
+    ctx.fillStyle = PAL.treeTop;
+    rr(ctx, cx - w * 0.40, top + h * 0.04, w * 0.80, h * 0.34, w * 0.22); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+    rr(ctx, cx - w * 0.30, top + h * 0.09, w * 0.36, h * 0.15, w * 0.10); ctx.fill();
   }
 
   function drawRock(cx, cy, T, s) {
@@ -934,13 +959,12 @@
     var top = cy - T * 0.06 - h * 0.62;
     drawShadow(cx + T * 0.05, cy + T * 0.24, w * 0.50, T * 0.11, 0.20);
     ink(T);
-    ctx.fillStyle = PAL.rockDark;
-    rr(ctx, cx - w / 2, top, w, h * 1.12, w * 0.30); ctx.fill();
-    ctx.fillStyle = PAL.rock;
-    rr(ctx, cx - w / 2, top, w, h * 0.74, w * 0.30); ctx.fill();
-    ctx.fillStyle = PAL.rockHi;
-    rr(ctx, cx - w * 0.32, top + h * 0.10, w * 0.42, h * 0.20, w * 0.10); ctx.fill();
-    rr(ctx, cx - w / 2, top, w, h * 1.12, w * 0.30); ctx.stroke();
+    var rg = ctx.createLinearGradient(0, top, 0, top + h * 1.10);
+    rg.addColorStop(0, PAL.rockHi);
+    rg.addColorStop(0.45, PAL.rock);
+    rg.addColorStop(1, PAL.rockDark);
+    ctx.fillStyle = rg;
+    rr(ctx, cx - w / 2, top, w, h * 1.10, w * 0.34); ctx.fill(); ctx.stroke();
   }
 
   /**
@@ -988,8 +1012,10 @@
   }
 
   /**
-   * Vehicles: a rounded chassis with a separate raised cabin, wheels with rims,
-   * and an ink outline — you read a top face and a side face like the reference.
+   * Vehicles. The cabin OVERLAPS the body rather than stacking on top of it —
+   * floated clear it reads as two unrelated boxes instead of one car. Buses get
+   * no cabin at all: they're a single tall body with a window strip, which is
+   * what a bus actually looks like from above.
    */
   function drawVehicle(lane, cx, row) {
     var T = View.tile;
@@ -1000,95 +1026,125 @@
     var y = sy(row);
     var flip = lane.dir < 0;
     var base = lane.itemColor;
-    var side = shade(base, 0.74);
-    var roofC = shade(base, 1.14);
+    var skirt = shade(base, 0.70);
+    var roofC = shade(base, 1.16);
     var isBus = lane.vType === 'bus', isTruck = lane.vType === 'truck';
 
-    var bodyH = T * (isBus ? 0.56 : isTruck ? 0.54 : 0.50);
-    var lift = T * 0.22;
-    var bodyTop = y - bodyH / 2 - lift * 0.3;
+    drawShadow(cx + T * 0.04, y + T * 0.30, len * 0.46, T * 0.13, 0.22);
 
-    drawShadow(cx + T * 0.03, y + T * 0.28, len * 0.47, T * 0.15, 0.24);
+    ctx.save();
+    var uk = 1 / CFG.WORLD_SQUASH;
+    ctx.translate(cx, y); ctx.scale(1, uk); ctx.translate(-cx, -y);
     ink(T);
 
-    // Wheels: dark tyre, light rim
-    var wy = bodyTop + bodyH * 0.74;
-    var ww = len * 0.17, wh = T * 0.22;
-    [0.13, 0.70].forEach(function (f) {
-      ctx.fillStyle = '#23272c';
-      rr(ctx, x + len * f, wy, ww, wh, T * 0.07); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#9aa3ab';
-      rr(ctx, x + len * f + ww * 0.28, wy + wh * 0.30, ww * 0.44, wh * 0.45, T * 0.04); ctx.fill();
+    // Exhaust puff behind the tailpipe
+    var puffX = flip ? x + len + T * 0.09 : x - T * 0.09;
+    ctx.fillStyle = 'rgba(230,238,245,0.5)';
+    ellipse(ctx, puffX, y + T * 0.10, T * 0.095, T * 0.070); ctx.fill();
+    ellipse(ctx, puffX + (flip ? T * 0.15 : -T * 0.15), y + T * 0.05, T * 0.06, T * 0.045);
+    ctx.fill();
+
+    var bodyH = T * (isBus ? 0.62 : isTruck ? 0.50 : 0.46);
+    var bodyTop = y + T * 0.14 - bodyH;      // body sits on the ground line
+
+    // Wheels first, so the body sits over their tops
+    var wy = y + T * 0.02;
+    var ww = len * 0.155, wh = T * 0.19;
+    var axles = isTruck ? [0.06, 0.58, 0.79] : isBus ? [0.08, 0.77] : [0.11, 0.70];
+    axles.forEach(function (f) {
+      var wx = x + len * f;
+      ctx.fillStyle = '#242a30';
+      rr(ctx, wx, wy, ww, wh, wh * 0.42); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#b6bec6';
+      rr(ctx, wx + ww * 0.29, wy + wh * 0.30, ww * 0.42, wh * 0.38, wh * 0.17); ctx.fill();
     });
 
-    // Chassis: shaded side face, then lit top
-    ctx.fillStyle = side;
-    rr(ctx, x, bodyTop + bodyH * 0.32, len, bodyH * 0.80, T * 0.15); ctx.fill();
-    ctx.fillStyle = base;
-    rr(ctx, x, bodyTop, len, bodyH * 0.90, T * 0.15); ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.16)';
-    rr(ctx, x + len * 0.05, bodyTop + bodyH * 0.06, len * 0.90, bodyH * 0.16, T * 0.06); ctx.fill();
-    rr(ctx, x, bodyTop, len, bodyH * 1.12, T * 0.15); ctx.stroke();
-
     if (isTruck) {
-      var boxW = len * 0.62, cabW = len * 0.36;
+      // Cargo box + short cab, both grounded on the chassis
+      var boxW = len * 0.58, cabW = len * 0.36;
       var boxX = flip ? x + len - boxW : x;
       var cabX = flip ? x : x + len - cabW;
+      var boxTop = bodyTop - bodyH * 0.62;
 
-      ctx.fillStyle = shade(PAL.cargo, 0.80);
-      rr(ctx, boxX, bodyTop - bodyH * 0.46, boxW, bodyH * 1.24, T * 0.10); ctx.fill();
-      ctx.fillStyle = PAL.cargo;
-      rr(ctx, boxX, bodyTop - bodyH * 0.68, boxW, bodyH * 1.02, T * 0.10); ctx.fill();
-      ctx.fillStyle = 'rgba(255,255,255,0.5)';
-      rr(ctx, boxX + T * 0.05, bodyTop - bodyH * 0.60, boxW - T * 0.10, bodyH * 0.22, T * 0.06); ctx.fill();
-      rr(ctx, boxX, bodyTop - bodyH * 0.68, boxW, bodyH * 1.46, T * 0.10); ctx.stroke();
+      ctx.fillStyle = skirt;
+      rr(ctx, x, bodyTop + bodyH * 0.42, len, bodyH * 0.66, T * 0.10); ctx.fill();
 
-      ctx.fillStyle = side;
-      rr(ctx, cabX, bodyTop - bodyH * 0.12, cabW, bodyH * 0.98, T * 0.11); ctx.fill();
+      // Cab
       ctx.fillStyle = base;
-      rr(ctx, cabX, bodyTop - bodyH * 0.32, cabW, bodyH * 0.90, T * 0.11); ctx.fill();
-      rr(ctx, cabX, bodyTop - bodyH * 0.32, cabW, bodyH * 1.18, T * 0.11); ctx.stroke();
-      ctx.fillStyle = PAL.glass;
-      rr(ctx, cabX + cabW * (flip ? 0.10 : 0.26), bodyTop - bodyH * 0.20,
-         cabW * 0.62, bodyH * 0.46, T * 0.06);
-      ctx.fill(); ctx.stroke();
-    } else {
-      var ghW = len * (isBus ? 0.90 : 0.60);
-      var ghX = x + (len - ghW) / 2 + (flip ? -len * 0.05 : len * 0.05);
-      var ghH = bodyH * 0.84;
-      var ghTop = bodyTop - ghH * 0.66;
-
-      ctx.fillStyle = shade(base, 0.90);
-      rr(ctx, ghX, ghTop + ghH * 0.24, ghW, ghH, T * 0.12); ctx.fill();
+      rr(ctx, cabX, bodyTop - bodyH * 0.30, cabW, bodyH * 1.34, T * 0.11); ctx.fill();
       ctx.fillStyle = roofC;
-      rr(ctx, ghX, ghTop, ghW, ghH * 0.92, T * 0.12); ctx.fill();
-      rr(ctx, ghX, ghTop, ghW, ghH * 1.24, T * 0.12); ctx.stroke();
+      rr(ctx, cabX + T * 0.04, bodyTop - bodyH * 0.26, cabW - T * 0.08, bodyH * 0.40, T * 0.08);
+      ctx.fill();
+      rr(ctx, cabX, bodyTop - bodyH * 0.30, cabW, bodyH * 1.34, T * 0.11); ctx.stroke();
+      ctx.fillStyle = PAL.glass;
+      rr(ctx, cabX + cabW * (flip ? 0.12 : 0.26), bodyTop + bodyH * 0.16,
+         cabW * 0.62, bodyH * 0.50, T * 0.05);
+      ctx.fill(); ctx.stroke();
+
+      // Cargo box, taller than the cab
+      ctx.fillStyle = shade(PAL.cargo, 0.84);
+      rr(ctx, boxX, boxTop, boxW, bodyH * 1.66, T * 0.07); ctx.fill();
+      ctx.fillStyle = PAL.cargo;
+      rr(ctx, boxX, boxTop, boxW, bodyH * 1.30, T * 0.07); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      rr(ctx, boxX + T * 0.05, boxTop + T * 0.04, boxW - T * 0.10, bodyH * 0.34, T * 0.05);
+      ctx.fill();
+      rr(ctx, boxX, boxTop, boxW, bodyH * 1.66, T * 0.07); ctx.stroke();
+    } else if (isBus) {
+      // One tall body, window strip down the flank
+      ctx.fillStyle = skirt;
+      rr(ctx, x, bodyTop + bodyH * 0.46, len, bodyH * 0.62, T * 0.12); ctx.fill();
+      ctx.fillStyle = base;
+      rr(ctx, x, bodyTop, len, bodyH * 1.02, T * 0.12); ctx.fill();
+      ctx.fillStyle = roofC;
+      rr(ctx, x + T * 0.05, bodyTop + T * 0.03, len - T * 0.10, bodyH * 0.28, T * 0.09);
+      ctx.fill();
+      rr(ctx, x, bodyTop, len, bodyH * 1.02, T * 0.12); ctx.stroke();
 
       ctx.fillStyle = PAL.glass;
-      if (isBus) {
-        for (var i = 0; i < 4; i++) {
-          rr(ctx, ghX + ghW * (0.06 + i * 0.235), ghTop + ghH * 0.22,
-             ghW * 0.18, ghH * 0.44, T * 0.045);
-          ctx.fill(); ctx.stroke();
-        }
-      } else {
-        rr(ctx, ghX + ghW * 0.09, ghTop + ghH * 0.20, ghW * 0.82, ghH * 0.48, T * 0.06);
+      for (var i = 0; i < 5; i++) {
+        rr(ctx, x + len * (0.07 + i * 0.175), bodyTop + bodyH * 0.34,
+           len * 0.13, bodyH * 0.36, T * 0.035);
         ctx.fill(); ctx.stroke();
-        ctx.fillStyle = 'rgba(255,255,255,0.42)';
-        rr(ctx, ghX + ghW * 0.12, ghTop + ghH * 0.24, ghW * 0.30, ghH * 0.36, T * 0.05);
-        ctx.fill();
       }
+    } else {
+      // Car: body, then a cabin that sinks into it
+      var ghW = len * 0.66;
+      var ghX = x + (len - ghW) / 2 + (flip ? -len * 0.04 : len * 0.04);
+      var ghH = bodyH * 0.86;
+      var ghTop = bodyTop - ghH * 0.44;      // ~56% of the cabin is inside the body
+
+      ctx.fillStyle = skirt;
+      rr(ctx, x, bodyTop + bodyH * 0.44, len, bodyH * 0.64, T * 0.13); ctx.fill();
+
+      // Cabin first so the body's outline closes over its base
+      ctx.fillStyle = roofC;
+      rr(ctx, ghX, ghTop, ghW, ghH * 1.30, T * 0.11); ctx.fill();
+      rr(ctx, ghX, ghTop, ghW, ghH * 1.30, T * 0.11); ctx.stroke();
+
+      ctx.fillStyle = base;
+      rr(ctx, x, bodyTop, len, bodyH * 1.00, T * 0.13); ctx.fill();
+      rr(ctx, x, bodyTop, len, bodyH * 1.00, T * 0.13); ctx.stroke();
+
+      // Glass sits in the exposed part of the cabin
+      var gy = ghTop + ghH * 0.20, gh2 = ghH * 0.46;
+      ctx.fillStyle = PAL.glass;
+      rr(ctx, ghX + ghW * 0.07, gy, ghW * 0.39, gh2, T * 0.045); ctx.fill(); ctx.stroke();
+      rr(ctx, ghX + ghW * 0.54, gy, ghW * 0.39, gh2, T * 0.045); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      rr(ctx, ghX + ghW * 0.10, gy + gh2 * 0.14, ghW * 0.13, gh2 * 0.56, T * 0.03); ctx.fill();
     }
 
-    // Lights
-    ctx.fillStyle = '#fff6cf';
-    rr(ctx, flip ? x + len * 0.015 : x + len * 0.955, bodyTop + bodyH * 0.36,
-       len * 0.03, bodyH * 0.26, T * 0.03);
-    ctx.fill();
+    // Lamps
+    var frontX = flip ? x + len * 0.05 : x + len * 0.95;
+    var backX = flip ? x + len * 0.95 : x + len * 0.05;
+    ctx.fillStyle = '#fff8d4';
+    ellipse(ctx, frontX, bodyTop + bodyH * 0.62, T * 0.045, T * 0.045); ctx.fill(); ctx.stroke();
     ctx.fillStyle = '#ff6b5c';
-    rr(ctx, flip ? x + len * 0.955 : x + len * 0.015, bodyTop + bodyH * 0.36,
-       len * 0.03, bodyH * 0.24, T * 0.03);
-    ctx.fill();
+    rr(ctx, backX - T * 0.028, bodyTop + bodyH * 0.50, T * 0.056, T * 0.095, T * 0.02);
+    ctx.fill(); ctx.stroke();
+
+    ctx.restore();
   }
 
   function drawLog(cx, row, len) {
@@ -1104,6 +1160,9 @@
     ctx.fillStyle = 'rgba(0,40,80,0.22)';
     rr(ctx, x + T * 0.03, top + h * 0.30, w, h * 0.92, h / 2); ctx.fill();
 
+    ctx.save();
+    var uk = 1 / CFG.WORLD_SQUASH;
+    ctx.translate(cx, y); ctx.scale(1, uk); ctx.translate(-cx, -y);
     ink(T);
     ctx.fillStyle = PAL.logDark;
     rr(ctx, x, top + h * 0.20, w, h * 0.86, h / 2); ctx.fill();
@@ -1121,57 +1180,110 @@
     ellipse(ctx, ex, ey, h * 0.13, h * 0.24); ctx.fill();
     ctx.fillStyle = PAL.logRing;
     ellipse(ctx, ex, ey, h * 0.05, h * 0.09); ctx.fill();
+    ctx.restore();
   }
 
+  /**
+   * The express: a nose car plus repeating coaches with couplings between them,
+   * so it reads as a train rather than one long painted bar.
+   */
   function drawTrain(lane, row, st) {
     var T = View.tile;
     var a = Math.min(st.head, st.tail), b = Math.max(st.head, st.tail);
     var x = sx(a), w = (b - a) * T;
     if (x > View.cullR || x + w < View.cullL) return;
-    var y = sy(row);
-    var h = T * 0.74;
-    var lift = T * 0.16;
 
-    drawShadow((x + x + w) / 2, y + T * 0.26, w * 0.48, T * 0.13, 0.26);
+    var y = sy(row);
+    var h = T * 0.70;
+    var top = y - h * 0.66;
+    var noseAtRight = lane.dir > 0;
+
+    drawShadow((x + x + w) / 2, y + T * 0.27, w * 0.48, T * 0.14, 0.26);
+    ctx.save();
+    var uk = 1 / CFG.WORLD_SQUASH;
+    ctx.translate(x + w / 2, y); ctx.scale(1, uk); ctx.translate(-(x + w / 2), -y);
     ink(T);
 
-    ctx.fillStyle = shade(PAL.trainBody, 0.70);
-    rr(ctx, x, y - h / 2 - lift + h * 0.30, w, h * 0.82, T * 0.12); ctx.fill();
-    ctx.fillStyle = PAL.trainBody;
-    rr(ctx, x, y - h / 2 - lift, w, h * 0.88, T * 0.12); ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.20)';
-    rr(ctx, x + T * 0.1, y - h / 2 - lift + h * 0.08, w - T * 0.2, h * 0.18, T * 0.07); ctx.fill();
-    rr(ctx, x, y - h / 2 - lift, w, h * 1.12, T * 0.12); ctx.stroke();
+    // Split the length into a nose car and coaches
+    var noseLen = T * 1.45;
+    var carGap = T * 0.16;
+    var coachSpan = w - noseLen;
+    var coachCount = Math.max(1, Math.round(coachSpan / (T * 2.5)));
+    var coachLen = (coachSpan - carGap * coachCount) / coachCount;
 
-    ctx.fillStyle = PAL.trainNose;
-    var nose = lane.dir > 0 ? x + w - T * 0.85 : x;
-    rr(ctx, nose, y - h / 2 - lift, T * 0.85, h * 0.88, T * 0.12); ctx.fill(); ctx.stroke();
+    function carriage(cx0, cLen, isNose) {
+      // Coupling stub behind the car
+      ctx.fillStyle = '#4c545e';
+      rr(ctx, cx0 - carGap, top + h * 0.42, carGap + T * 0.04, h * 0.16, T * 0.02);
+      ctx.fill();
 
-    ctx.fillStyle = PAL.glass;
-    var step = T * 1.05;
-    for (var wx = x + T * 1.0; wx < x + w - T * 0.9; wx += step) {
-      rr(ctx, wx, y - h * 0.26 - lift, T * 0.46, h * 0.28, T * 0.05);
-      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = shade(PAL.trainBody, 0.68);
+      rr(ctx, cx0, top + h * 0.30, cLen, h * 0.84, T * 0.13); ctx.fill();
+      ctx.fillStyle = isNose ? PAL.trainNose : PAL.trainBody;
+      rr(ctx, cx0, top, cLen, h * 0.88, T * 0.13); ctx.fill();
+      // Roof highlight
+      ctx.fillStyle = 'rgba(255,255,255,0.22)';
+      rr(ctx, cx0 + T * 0.08, top + h * 0.07, cLen - T * 0.16, h * 0.16, T * 0.05); ctx.fill();
+      // Skirt stripe
+      ctx.fillStyle = 'rgba(0,0,0,0.20)';
+      rr(ctx, cx0, top + h * 0.72, cLen, h * 0.14, T * 0.04); ctx.fill();
+      rr(ctx, cx0, top, cLen, h * 1.14, T * 0.13); ctx.stroke();
+
+      // Windows
+      ctx.fillStyle = PAL.glass;
+      var winH = h * 0.30, winY = top + h * 0.24;
+      if (isNose) {
+        var wsW = cLen * 0.30;
+        var wsX = noseAtRight ? cx0 + cLen - wsW - T * 0.12 : cx0 + T * 0.12;
+        rr(ctx, wsX, winY, wsW, winH, T * 0.05); ctx.fill(); ctx.stroke();
+        // Headlamp on the leading face
+        ctx.fillStyle = '#fff4c2';
+        var hx = noseAtRight ? cx0 + cLen - T * 0.16 : cx0 + T * 0.06;
+        rr(ctx, hx, top + h * 0.60, T * 0.10, h * 0.16, T * 0.03); ctx.fill(); ctx.stroke();
+      } else {
+        var n = Math.max(2, Math.floor(cLen / (T * 0.62)));
+        var pad = T * 0.14;
+        var slot = (cLen - pad * 2) / n;
+        for (var i = 0; i < n; i++) {
+          rr(ctx, cx0 + pad + slot * i + slot * 0.12, winY, slot * 0.72, winH, T * 0.045);
+          ctx.fill(); ctx.stroke();
+        }
+      }
     }
 
-    ctx.fillStyle = 'rgba(255,255,255,0.16)';
-    for (var i = 0; i < 5; i++) {
-      var sxp = lane.dir > 0 ? x - T * (0.6 + i * 0.9) : x + w + T * (0.6 + i * 0.9);
-      ctx.fillRect(sxp, y - h * 0.3 + i * T * 0.13, T * 0.7, Math.max(1, T * 0.045));
+    // Lay the cars out with the nose on the leading end
+    var cursor;
+    if (noseAtRight) {
+      cursor = x;
+      for (var i = 0; i < coachCount; i++) { carriage(cursor, coachLen, false); cursor += coachLen + carGap; }
+      carriage(cursor, noseLen, true);
+    } else {
+      carriage(x, noseLen, true);
+      cursor = x + noseLen + carGap;
+      for (var j = 0; j < coachCount; j++) { carriage(cursor, coachLen, false); cursor += coachLen + carGap; }
     }
+
+    // Speed streaks trailing the train
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    for (var k = 0; k < 5; k++) {
+      var sxp = noseAtRight ? x - T * (0.6 + k * 0.9) : x + w + T * (0.6 + k * 0.9);
+      ctx.fillRect(sxp, top + h * 0.16 + k * T * 0.12, T * 0.7, Math.max(1, T * 0.045));
+    }
+    ctx.restore();
   }
 
   /**
-   * Level-crossing signals. Pinned to the screen edge rather than to a world
-   * column: the playfield is far wider than a phone viewport, so a
-   * world-anchored signal would sit off-screen and the 1.2s warning — the whole
-   * point of it — would never be seen. Drawn after the tilt, rotated by hand so
-   * they still sit square to the track.
+   * Level-crossing signal: post, crossbuck, and two lamps on a crossbar that
+   * alternate like the real thing. Pinned to the screen edge rather than a
+   * world column — the playfield is far wider than a phone viewport, so a
+   * world-anchored signal would sit off-screen and the 1.2s warning would
+   * never be seen. Drawn after the tilt and rotated by hand so it still sits
+   * square to the track.
    */
   function drawCrossing(row, st) {
     var T = View.tile;
     var lit = st.warn && st.blink;
-    var inset = Math.max(T * 0.6, 24);
+    var inset = Math.max(T * 0.62, 26);
 
     [View.w - inset].forEach(function (screenX) {
       var p = laneEdgePoint(row, screenX);
@@ -1182,32 +1294,48 @@
       ctx.rotate(CFG.WORLD_ANGLE);
       ink(T);
 
-      ctx.fillStyle = '#8b9299';
-      rr(ctx, -T * 0.05, -T * 0.10, T * 0.10, T * 0.66, T * 0.03); ctx.fill(); ctx.stroke();
+      // Post
+      ctx.fillStyle = '#5c6a60';
+      rr(ctx, -T * 0.055, -T * 0.06, T * 0.11, T * 0.74, T * 0.03); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.20)';
+      rr(ctx, -T * 0.055, -T * 0.06, T * 0.042, T * 0.74, T * 0.02); ctx.fill();
 
+      // Crossbuck
       ctx.save();
-      ctx.translate(0, -T * 0.52);
-      [-0.72, 0.72].forEach(function (rot) {
+      ctx.translate(0, -T * 0.66);
+      [-0.70, 0.70].forEach(function (rot) {
         ctx.save();
         ctx.rotate(rot);
-        ctx.fillStyle = '#f4f1e6';
-        rr(ctx, -T * 0.26, -T * 0.045, T * 0.52, T * 0.09, T * 0.04); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#f7f3e8';
+        rr(ctx, -T * 0.27, -T * 0.047, T * 0.54, T * 0.094, T * 0.045);
+        ctx.fill(); ctx.stroke();
         ctx.restore();
       });
       ctx.restore();
 
+      // Crossbar carrying the lamps
+      ctx.fillStyle = '#47524a';
+      rr(ctx, -T * 0.25, -T * 0.335, T * 0.50, T * 0.070, T * 0.028);
+      ctx.fill(); ctx.stroke();
+
+      // Alternating lamps
       [-1, 1].forEach(function (dx, i) {
-        var on = lit && ((i === 0) === (st.blink));
-        var lx = dx * T * 0.15, ly = -T * 0.16;
-        if (on) {
-          ctx.fillStyle = 'rgba(255,60,60,0.34)';
-          ellipse(ctx, lx, ly, T * 0.26, T * 0.26); ctx.fill();
+        var on = lit && ((i === 0) === st.blink);
+        var lx = dx * T * 0.175, ly = -T * 0.185;
+
+        if (on) {                       // soft halo, so it reads at a glance
+          ctx.fillStyle = 'rgba(255,58,48,0.30)';
+          ellipse(ctx, lx, ly, T * 0.27, T * 0.27); ctx.fill();
+          ctx.fillStyle = 'rgba(255,58,48,0.28)';
+          ellipse(ctx, lx, ly, T * 0.185, T * 0.185); ctx.fill();
         }
-        ctx.fillStyle = on ? PAL.warnOn : PAL.warnOff;
-        ellipse(ctx, lx, ly, T * 0.11, T * 0.11); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#39423b';       // housing
+        ellipse(ctx, lx, ly, T * 0.112, T * 0.112); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = on ? '#ff3b30' : '#6d2622';
+        ellipse(ctx, lx, ly, T * 0.078, T * 0.078); ctx.fill();
         if (on) {
-          ctx.fillStyle = 'rgba(255,255,255,0.75)';
-          ellipse(ctx, lx - T * 0.035, ly - T * 0.035, T * 0.04, T * 0.04); ctx.fill();
+          ctx.fillStyle = 'rgba(255,255,255,0.85)';
+          ellipse(ctx, lx - T * 0.026, ly - T * 0.026, T * 0.030, T * 0.030); ctx.fill();
         }
       });
 
@@ -1221,6 +1349,11 @@
 
   var DIR_ANGLE = [0, Math.PI / 2, Math.PI, -Math.PI / 2];
 
+  /**
+   * The chicken, seen from behind and slightly above — tail toward the camera,
+   * comb over the top of the head. Built back-to-front so each piece tucks
+   * under the one in front of it.
+   */
   function drawChicken(cx, cy, size, dirIdx, opts) {
     opts = opts || {};
     var alpha = opts.alpha == null ? 1 : opts.alpha;
@@ -1232,63 +1365,80 @@
     ctx.save();
     ctx.globalAlpha *= alpha;
     ctx.translate(cx, cy);
-    ctx.scale(sxs, sys);
+    ctx.scale(sxs, sys / CFG.WORLD_SQUASH);   // stand upright against the tilt
     ctx.rotate(DIR_ANGLE[dirIdx] || 0);
     ink(T);
 
     var s = size;
+    var isWhite = body === '#ffffff';
+    var shadeBody = shade(isWhite ? '#e8eef4' : body, 0.90);
+    var liteBody = isWhite ? '#ffffff' : shade(body, 1.10);
 
-    // Feet, peeking out below the body
-    ctx.fillStyle = '#f39c2b';
-    rr(ctx, -s * 0.19, s * 0.34, s * 0.14, s * 0.15, s * 0.05); ctx.fill(); ctx.stroke();
-    rr(ctx, s * 0.05, s * 0.34, s * 0.14, s * 0.15, s * 0.05); ctx.fill(); ctx.stroke();
-
-    // Tail tuft (toward the viewer)
-    ctx.fillStyle = shade(body === '#ffffff' ? '#e9eef3' : body, 0.96);
+    // Tail fan, pointing back at the camera
+    ctx.fillStyle = shadeBody;
     ctx.beginPath();
-    ctx.moveTo(-s * 0.10, s * 0.28);
-    ctx.lineTo(s * 0.10, s * 0.28);
-    ctx.lineTo(0, s * 0.46);
+    ctx.moveTo(-s * 0.17, s * 0.16);
+    ctx.lineTo(s * 0.17, s * 0.16);
+    ctx.lineTo(s * 0.12, s * 0.45);
+    ctx.lineTo(s * 0.045, s * 0.34);
+    ctx.lineTo(-s * 0.045, s * 0.45);
+    ctx.lineTo(-s * 0.12, s * 0.34);
     ctx.closePath();
     ctx.fill(); ctx.stroke();
+
+    // Feet
+    ctx.fillStyle = '#f5a623';
+    rr(ctx, -s * 0.21, s * 0.28, s * 0.14, s * 0.17, s * 0.055); ctx.fill(); ctx.stroke();
+    rr(ctx, s * 0.07, s * 0.28, s * 0.14, s * 0.17, s * 0.055); ctx.fill(); ctx.stroke();
 
     // Body
     ctx.fillStyle = body;
-    ellipse(ctx, 0, s * 0.08, s * 0.37, s * 0.40); ctx.fill(); ctx.stroke();
+    ellipse(ctx, 0, s * 0.06, s * 0.365, s * 0.385); ctx.fill(); ctx.stroke();
+    // Soft top-light so the body reads round, not flat
+    ctx.fillStyle = liteBody;
+    ctx.globalAlpha *= 0.55;
+    ellipse(ctx, 0, -s * 0.02, s * 0.24, s * 0.22); ctx.fill();
+    ctx.globalAlpha /= 0.55;
 
-    // Folded-wing crease down the back
-    ctx.beginPath();
-    ctx.moveTo(-s * 0.20, s * 0.02);
-    ctx.quadraticCurveTo(-s * 0.06, s * 0.30, 0, s * 0.12);
-    ctx.quadraticCurveTo(s * 0.06, s * 0.30, s * 0.20, s * 0.02);
-    ctx.stroke();
+    // Folded wings, tucked against the flanks rather than stuck on the sides
+    ctx.fillStyle = shadeBody;
+    [-1, 1].forEach(function (side) {
+      ctx.beginPath();
+      ctx.ellipse(side * s * 0.215, s * 0.11, s * 0.088, s * 0.175, side * 0.26, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    });
 
     // Head
     ctx.fillStyle = body;
-    ellipse(ctx, 0, -s * 0.28, s * 0.26, s * 0.25); ctx.fill(); ctx.stroke();
+    ellipse(ctx, 0, -s * 0.25, s * 0.245, s * 0.235); ctx.fill(); ctx.stroke();
 
-    // Beak tip peeking past the head
-    ctx.fillStyle = '#f5a623';
+    // Beak tip, just cresting the far side of the head
+    ctx.fillStyle = '#ef8f1c';
     ctx.beginPath();
-    ctx.moveTo(-s * 0.07, -s * 0.44);
-    ctx.lineTo(s * 0.07, -s * 0.44);
-    ctx.lineTo(0, -s * 0.56);
+    ctx.moveTo(-s * 0.065, -s * 0.435);
+    ctx.lineTo(s * 0.065, -s * 0.435);
+    ctx.lineTo(0, -s * 0.525);
     ctx.closePath();
     ctx.fill(); ctx.stroke();
 
-    // Comb
+    // Comb: three rounded bumps
     ctx.fillStyle = '#e8453c';
-    ellipse(ctx, -s * 0.09, -s * 0.46, s * 0.075, s * 0.07); ctx.fill();
-    ellipse(ctx, s * 0.01, -s * 0.51, s * 0.08, s * 0.075); ctx.fill();
-    ellipse(ctx, s * 0.10, -s * 0.46, s * 0.07, s * 0.065); ctx.fill();
     ctx.beginPath();
-    ctx.arc(-s * 0.09, -s * 0.46, s * 0.072, Math.PI, 0);
-    ctx.arc(s * 0.01, -s * 0.51, s * 0.078, Math.PI, 0);
-    ctx.arc(s * 0.10, -s * 0.46, s * 0.068, Math.PI, 0);
-    ctx.stroke();
+    ctx.arc(-s * 0.095, -s * 0.415, s * 0.078, Math.PI * 0.98, Math.PI * 2.02);
+    ctx.arc(s * 0.005, -s * 0.465, s * 0.086, Math.PI * 0.98, Math.PI * 2.02);
+    ctx.arc(s * 0.105, -s * 0.415, s * 0.072, Math.PI * 0.98, Math.PI * 2.02);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+
+    // Eyes peeking round the sides of the head
+    ctx.fillStyle = '#1b2530';
+    ellipse(ctx, -s * 0.155, -s * 0.255, s * 0.043, s * 0.050); ctx.fill();
+    ellipse(ctx, s * 0.155, -s * 0.255, s * 0.043, s * 0.050); ctx.fill();
 
     ctx.restore();
   }
+
 
   function drawPlayer() {
     var T = View.tile;
@@ -1491,10 +1641,7 @@
     ctx.restore(); // release the playfield clip
     ctx.restore(); // release the world tilt
 
-    // Screen-space layer: warning wash, signals, labels, popups.
-    for (var wi = 0; wi < crossings.length; wi++) {
-      drawCrossingWash(crossings[wi].row, crossings[wi].st);
-    }
+    // Screen-space layer: signals, labels, popups.
     // Show a post only where it carries information: any track that is warning
     // or occupied, plus the next track ahead.
     var nearest = null;
@@ -1508,24 +1655,25 @@
       if (c2.st.warn || c2.st.active || c2 === nearest) drawCrossing(c2.row, c2.st);
     }
 
+    drawLightBand();
     if (Game.phase !== 'menu') Popups.draw(ctx, View);
     drawGhostOverlay();
   }
 
-  /** Red wash across a track that is about to be hit by a train. */
-  function drawCrossingWash(row, st) {
-    if (!st.warn || !st.blink) return;
-    var T = View.tile;
-    var a = laneEdgePoint(row, -View.w);
-    var b = laneEdgePoint(row, View.w * 2);
-    ctx.save();
-    ctx.strokeStyle = 'rgba(255,45,45,0.16)';
-    ctx.lineWidth = T * CFG.WORLD_SQUASH;
-    ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
-    ctx.stroke();
-    ctx.restore();
+  /**
+   * A soft diagonal shaft of light across the board. Costs one gradient fill
+   * and does more for the "one illustrated scene" feel than any single prop —
+   * it ties the lanes together instead of leaving them as separate stripes.
+   */
+  function drawLightBand() {
+    var g = ctx.createLinearGradient(View.w * 0.95, 0, -View.w * 0.15, View.h);
+    g.addColorStop(0.00, 'rgba(255,255,255,0.00)');
+    g.addColorStop(0.28, 'rgba(255,255,255,0.085)');
+    g.addColorStop(0.55, 'rgba(255,255,255,0.03)');
+    g.addColorStop(0.56, 'rgba(0,0,0,0.010)');
+    g.addColorStop(1.00, 'rgba(0,0,0,0.045)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, View.w, View.h);
   }
 
   /* ====================================================================== */
@@ -1602,21 +1750,10 @@
       if (Player.hopping) return;                 // brief i-frames mid-hop
       for (var i = 0; i < lane.items.length; i++) {
         var cx = itemX(lane, i, Game.t);
-        var d = Math.abs(Player.x - cx);
-        if (d < lane.len / 2 + 0.40) { onDeath('squash'); return; }
-        // Near miss: it got close enough to ruffle feathers but didn't hit.
-        var nkey = lane.row + ':' + i;
-        if (d < lane.len / 2 + CFG.NEAR_MISS) {
-          if (!Game.nearFlags[nkey]) {
-            // A near miss is felt, not announced — a shove of the camera and a
-            // low thrum. No text: this fires often and would read as clutter.
-            Game.nearFlags[nkey] = true;
-            Game.shake = Math.max(Game.shake, 0.45);
-            SFX.near();
-          }
-        } else if (d > lane.len / 2 + CFG.NEAR_MISS * 1.8) {
-          Game.nearFlags[nkey] = false;
-        }
+        // Only a real hit does anything. Near-miss feedback used to shove the
+        // camera every time a car brushed past, which fires constantly on a
+        // busy road and just read as the screen glitching.
+        if (Math.abs(Player.x - cx) < lane.len / 2 + 0.40) { onDeath('squash'); return; }
       }
     } else if (lane.type === 'rail') {
       var st = trainState(lane, Game.t);
@@ -2166,7 +2303,6 @@
       Player.reset();
       Popups.clear();
       Game.trainAlerted = {};
-      Game.nearFlags = {};
       Game.cam.x = 0;
       Game.cam.row = 0.35;
       Game.shake = 0;
