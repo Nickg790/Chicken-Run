@@ -44,7 +44,6 @@
     HOP_ARC: 0.55,          // peak hop height, in tiles
     MIN_X: -8,              // wider field than the visible window
     MAX_X: 8,
-   var SOCKET_URL = RENDER_URL;
     SAFE_ROWS: 4,           // grass runway before the first hazard
     MAX_HAZARD_RUN: 5,      // most consecutive non-grass lanes allowed
 
