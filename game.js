@@ -54,6 +54,14 @@
     SAFE_ROWS: 4,           // grass runway before the first hazard
     MAX_HAZARD_RUN: 5,      // most consecutive non-grass lanes allowed
 
+    // Skill ramp. Traffic near the start line is slow and open so the first
+    // hops are readable; by DIFF_FULL tiles it is fast and tight. This is what
+    // makes the cashout decision a real one — every extra tile is worth the
+    // same 1 point, but costs more to take.
+    DIFF_FULL: 70,
+    DIFF_SPEED: 0.62,       // +62% vehicle speed at full difficulty
+    DIFF_TIGHTEN: 0.30,     // -30% gap at full difficulty
+
     // Risk / reward economy: one point per new tile, flat. All the tension
     // is in how far you push before banking.
     TILE_POINTS: 1,
@@ -389,7 +397,16 @@
       }
 
       var dir = rng() < 0.5 ? 1 : -1;
-      var gap = len + 3.4 + rng() * 4.0;
+      var d = difficultyAt(row);
+      speed *= 1 + d * CFG.DIFF_SPEED;
+      var gap = (len + 3.4 + rng() * 4.0) * (1 - d * CFG.DIFF_TIGHTEN);
+
+      // Fairness floor: however tight it gets, the window between two vehicles
+      // must stay long enough to hop into and out of. Without this the ramp
+      // eventually produces roads that simply cannot be crossed.
+      var minFree = 1.30 + speed * 0.42;
+      if (gap - len < minFree) gap = len + minFree;
+
       var span = Math.max(CFG.SPAWN_R - CFG.SPAWN_L, gap * 2);
       var count = Math.max(2, Math.ceil(span / gap));
       span = count * gap;
@@ -413,8 +430,10 @@
       if (rng() < 0.42) return this.makePadRiver(row);
 
       var dir = rng() < 0.5 ? 1 : -1;
-      var speed = 0.9 + rng() * 1.35;
-      var gap = 4.0 + rng() * 4.2;
+      var d = difficultyAt(row);
+      var speed = (0.9 + rng() * 1.35) * (1 + d * 0.45);
+      var gap = (4.0 + rng() * 4.2) * (1 - d * 0.22);
+      if (gap < 3.4) gap = 3.4;              // always a reachable next log
       var span = Math.max(CFG.SPAWN_R - CFG.SPAWN_L, gap * 2);
       var count = Math.max(2, Math.ceil(span / gap));
       span = count * gap;
@@ -463,10 +482,14 @@
 
     makeRail: function (row) {
       var rng = this.rng;
+      var d = difficultyAt(row);
+      // Never let the period fall near the warning+sweep window, or the lights
+      // would still be flashing from one train as the next arrived.
+      var period = Math.max(3.4, (4.6 + rng() * 3.2) * (1 - d * 0.34));
       return {
         row: row, type: 'rail',
         dir: rng() < 0.5 ? 1 : -1,
-        period: 4.6 + rng() * 3.2,
+        period: period,
         phase: rng() * 8
       };
     }
@@ -477,6 +500,14 @@
   /* ---------------------------------------------------------------------- */
 
   function wrapX(v, span) { return mod(v - CFG.SPAWN_L, span) + CFG.SPAWN_L; }
+
+  /**
+   * 0 at the start line, 1 by DIFF_FULL tiles in. A pure function of the row,
+   * so both players in a match hit identical difficulty at identical rows.
+   */
+  function difficultyAt(row) {
+    return clamp((row - CFG.SAFE_ROWS) / CFG.DIFF_FULL, 0, 1);
+  }
 
   /** Centre x of moving item i on a road/river lane at match time t. */
   function itemX(lane, i, t) {
@@ -798,6 +829,10 @@
     if (lane.type === 'grass') {
       ctx.fillStyle = lane.shade ? PAL.grassA : PAL.grassB;
       ctx.fillRect(x0, y, w, T + 1);
+      // A faint mown stripe down the middle. Barely visible on its own, but it
+      // keeps a run of grass lanes from reading as one flat slab of colour.
+      ctx.fillStyle = 'rgba(255,255,255,0.05)';
+      ctx.fillRect(x0, y + T * 0.30, w, T * 0.26);
     } else if (lane.type === 'road') {
       ctx.fillStyle = lane.shade ? PAL.road : PAL.roadB;
       ctx.fillRect(x0, y, w, T + 1);
@@ -1052,13 +1087,6 @@
     var uk = 1 / CFG.WORLD_SQUASH;
     ctx.translate(cx, y); ctx.scale(1, uk); ctx.translate(-cx, -y);
     ink(T);
-
-    // Exhaust puff off the tail
-    var puffX = flip ? x + len + T * 0.09 : x - T * 0.09;
-    ctx.fillStyle = 'rgba(228,236,244,0.55)';
-    ellipse(ctx, puffX, y + T * 0.09, T * 0.085, T * 0.065); ctx.fill();
-    ellipse(ctx, puffX + (flip ? T * 0.14 : -T * 0.14), y + T * 0.03, T * 0.055, T * 0.042);
-    ctx.fill();
 
     // Wheels
     var wy = y - T * 0.02;
@@ -1375,14 +1403,14 @@
     rr(ctx, -s * 0.21, s * 0.28, s * 0.14, s * 0.17, s * 0.055); ctx.fill(); ctx.stroke();
     rr(ctx, s * 0.07, s * 0.28, s * 0.14, s * 0.17, s * 0.055); ctx.fill(); ctx.stroke();
 
-    // Body
-    ctx.fillStyle = body;
-    ellipse(ctx, 0, s * 0.06, s * 0.365, s * 0.385); ctx.fill(); ctx.stroke();
-    // Soft top-light so the body reads round, not flat
-    ctx.fillStyle = liteBody;
-    ctx.globalAlpha *= 0.55;
-    ellipse(ctx, 0, -s * 0.02, s * 0.24, s * 0.22); ctx.fill();
-    ctx.globalAlpha /= 0.55;
+    // Body, lit from the upper left like every other prop on the board
+    var bg = ctx.createRadialGradient(-s * 0.12, -s * 0.10, s * 0.04,
+                                      0, s * 0.08, s * 0.46);
+    bg.addColorStop(0, liteBody);
+    bg.addColorStop(0.55, body);
+    bg.addColorStop(1, shadeBody);
+    ctx.fillStyle = bg;
+    ellipse(ctx, 0, s * 0.06, s * 0.375, s * 0.395); ctx.fill(); ctx.stroke();
 
     // Folded wings, tucked against the flanks rather than stuck on the sides
     ctx.fillStyle = shadeBody;
@@ -1393,9 +1421,14 @@
       ctx.stroke();
     });
 
-    // Head
-    ctx.fillStyle = body;
-    ellipse(ctx, 0, -s * 0.25, s * 0.245, s * 0.235); ctx.fill(); ctx.stroke();
+    // Head, same light direction
+    var hg = ctx.createRadialGradient(-s * 0.09, -s * 0.34, s * 0.02,
+                                      0, -s * 0.25, s * 0.30);
+    hg.addColorStop(0, liteBody);
+    hg.addColorStop(0.6, body);
+    hg.addColorStop(1, shadeBody);
+    ctx.fillStyle = hg;
+    ellipse(ctx, 0, -s * 0.25, s * 0.25, s * 0.24); ctx.fill(); ctx.stroke();
 
     // Beak tip, just cresting the far side of the head
     ctx.fillStyle = '#ef8f1c';
@@ -1428,7 +1461,7 @@
     var T = View.tile;
     var cx = sx(Player.fx);
     var groundY = sy(Player.frow);
-    var size = T * 0.86;
+    var size = T * 0.92;
 
     if (Player.death) { drawDeath(cx, groundY, size); return; }
 
@@ -1501,7 +1534,7 @@
     ctx.save();
     ctx.globalAlpha = 0.40;
     drawShadow(sx(g.fx), sy(g.frow) + T * 0.26, T * 0.28, T * 0.12, 0.35);
-    drawChicken(sx(g.fx), sy(g.frow) - T * 0.06, T * 0.86, 0, { body: '#ff9f43' });
+    drawChicken(sx(g.fx), sy(g.frow) - T * 0.06, T * 0.92, 0, { body: '#ff9f43' });
     ctx.restore();
   }
 
@@ -1871,8 +1904,10 @@
         var key = r + ':' + Math.floor((Game.t + ln.phase) / ln.period);
         if (st.warn && !Game.trainAlerted[key]) {
           Game.trainAlerted[key] = true;
+          // Announced by the flashing signals and this callout — no camera
+          // jolt. Incidental shake during play reads as the screen glitching;
+          // shake is now reserved exclusively for dying.
           Popups.add('TRAIN', PAL.crimson, { size: 0.30, vy: 1.1, centre: true, life: 0.8 });
-          Game.shake = Math.max(Game.shake, 0.2);
         }
       }
     }
