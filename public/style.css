@@ -72,6 +72,16 @@ html, body {
 
 #stage { position: fixed; inset: 0; overflow: hidden; background: var(--void); }
 
+/* The menu screen picked up a customize section on top of everything it
+   already had; on the shortest phones that can outgrow the viewport. Let
+   this one screen scroll rather than clip, without opening scrolling up
+   anywhere else in the app. */
+#screen-menu {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+
 #game {
   position: absolute;
   inset: 0;
@@ -357,6 +367,59 @@ html, body {
   color: var(--text-faint);
 }
 
+/* --- Customize: which animal, and what colour --- */
+.cosmetic {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  pointer-events: auto;
+}
+.cosmetic-preview {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  background:
+    radial-gradient(60% 60% at 50% 38%, rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0) 70%),
+    var(--glass-soft);
+  border: 1.5px solid var(--stroke);
+}
+.species-row, .color-row { display: flex; gap: 7px; }
+.species-btn {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 38px; height: 38px;
+  border-radius: 12px;
+  font-size: 19px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  background: var(--glass-soft);
+  border: 1.5px solid var(--stroke);
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: transform 90ms ease, border-color 120ms ease, background 120ms ease;
+}
+.species-btn:active { transform: translateY(1px); }
+.species-btn.selected {
+  background: rgba(126, 200, 80, 0.16);
+  border-color: rgba(126, 200, 80, 0.75);
+  box-shadow: 0 0 14px rgba(126, 200, 80, 0.28);
+}
+.color-swatch {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  padding: 0;
+  border: 2px solid var(--stroke);
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: transform 90ms ease, border-color 120ms ease;
+}
+.color-swatch:active { transform: scale(0.9); }
+.color-swatch.selected { border-color: #fff; box-shadow: 0 0 0 2px rgba(126, 200, 80, 0.65); }
+
 /* Buttons */
 .menu-buttons { display: flex; flex-direction: column; gap: 9px; width: min(320px, 84vw); pointer-events: auto; }
 .btn {
@@ -605,4 +668,6 @@ html, body {
   .h2h-strip { padding: 8px 12px; }
   .h2h-score { font-size: 20px; }
   .overlay { gap: 9px; }
+  .cosmetic-preview { width: 58px; height: 58px; }
+  .species-btn { width: 32px; height: 32px; font-size: 16px; }
 }
