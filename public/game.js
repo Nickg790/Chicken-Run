@@ -205,6 +205,33 @@
   };
 
   /* ====================================================================== */
+  /* Cosmetic choice — which animal you are, and what colour (localStorage). */
+  /* SPECIES itself is defined further down, next to the sprite renderer —   */
+  /* fine, since nothing here runs until well after the whole script has.    */
+  /* ====================================================================== */
+
+  var Cosmetics = {
+    species: function () {
+      var s = H2H.read('cr_species', 'chicken');
+      return SPECIES[s] ? s : 'chicken';
+    },
+    setSpecies: function (s) {
+      if (!SPECIES[s]) return;
+      H2H.write('cr_species', s);
+      // The stored colour may not exist on the new species' palette — fall
+      // back to that species' default rather than carry over an odd one.
+      var colors = SPECIES[s].colors;
+      if (colors.indexOf(this.color()) === -1) this.setColor(colors[0]);
+    },
+    color: function () {
+      var colors = SPECIES[this.species()].colors;
+      var c = H2H.read('cr_color', colors[0]);
+      return colors.indexOf(c) === -1 ? colors[0] : c;
+    },
+    setColor: function (c) { H2H.write('cr_color', c); }
+  };
+
+  /* ====================================================================== */
   /* Sound — tiny WebAudio blips, no assets                                  */
   /* ====================================================================== */
 
@@ -546,6 +573,9 @@
     queued: null,
     squash: 0,
 
+    species: 'chicken',        // cosmetic only — set from Cosmetics, never reset by a run
+    bodyColor: '#ffffff',
+
     reset: function () {
       this.x = 0; this.row = 0; this.fx = 0; this.frow = 0;
       this.fromX = 0; this.fromRow = 0; this.toX = 0; this.toRow = 0;
@@ -572,7 +602,8 @@
     ghost: {
       x: 0, row: 0, fx: 0, frow: 0,
       pending: 0, banked: 0,
-      status: 'running', active: false
+      status: 'running', active: false,
+      species: 'chicken', bodyColor: '#ff9f43'   // set from the opponent's own pick at matchStart
     },
     lastFrame: 0,
     shake: 0,
@@ -826,11 +857,18 @@
       ctx.fillRect(x0, y, w, T + 1);
       ctx.fillStyle = 'rgba(0,0,0,0.14)';
       ctx.fillRect(x0, y, w, T * 0.07);
+      // Sleepers sit on the WORLD grid, not the screen. Laying them out with a
+      // screen-space modulo made them crawl sideways against the rails as the
+      // camera panned; on a high-contrast repeating stripe that reads as a
+      // moire shimmer, which is what makes the tracks painful to look at.
+      // Anchored to world x they simply translate with everything else.
       ctx.fillStyle = PAL.tie;
-      var step = T * 0.46;
-      var startTie = x0 - mod(sx(0) - x0, step);
-      for (var tx = startTie; tx < x0 + w; tx += step) {
-        rr(ctx, tx, y + T * 0.17, step * 0.56, T * 0.66, T * 0.03);
+      var TIE = 0.58;                                   // world tiles per sleeper
+      var wLeft = (x0 - View.w / 2) / T + Game.cam.x;
+      var wRight = (x0 + w - View.w / 2) / T + Game.cam.x;
+      var tieW = T * TIE * 0.54;
+      for (var ti = Math.floor(wLeft / TIE); ti <= Math.ceil(wRight / TIE); ti++) {
+        rr(ctx, sx(ti * TIE) - tieW / 2, y + T * 0.17, tieW, T * 0.66, T * 0.03);
         ctx.fill();
       }
       // Rails: dark seat, steel head, bright top highlight
@@ -1304,20 +1342,35 @@
   }
 
   /* ---------------------------------------------------------------------- */
-  /* Chicken sprite — seen from behind, the way the reference frames it      */
+  /* Critter sprites — seen from behind, the way the reference frames it     */
   /* ---------------------------------------------------------------------- */
 
   var DIR_ANGLE = [0, Math.PI / 2, Math.PI, -Math.PI / 2];
 
   /**
-   * The chicken, seen from behind and slightly above — tail toward the camera,
-   * comb over the top of the head. Built back-to-front so each piece tucks
-   * under the one in front of it.
+   * Which animals a player can be, and the palette they can pick per animal.
+   * The FIRST colour in each list is that species' default body colour.
+   */
+  var SPECIES = {
+    chicken: { label: 'CHICKEN', emoji: '🐔', colors: ['#ffffff', '#d9a441', '#7a4c2e', '#e8453c', '#3a3a40'] },
+    duck:    { label: 'DUCK',    emoji: '🦆', colors: ['#ffe066', '#ffffff', '#6b4a35', '#3f4a52', '#7bb8e8'] },
+    pig:     { label: 'PIG',     emoji: '🐷', colors: ['#f4a6c1', '#f7c8d9', '#c97a94', '#3f3f46', '#f2d17a'] },
+    manatee: { label: 'MANATEE', emoji: '🦭', colors: ['#8fa3a8', '#a8b8ba', '#6f8285', '#c2b280', '#5a6b6e'] }
+  };
+  var SPECIES_ORDER = ['chicken', 'duck', 'pig', 'manatee'];
+
+  function speciesOf(name) { return SPECIES[name] ? name : 'chicken'; }
+
+  /**
+   * One critter, seen from behind and slightly above — tail toward the
+   * camera. Built back-to-front so each piece tucks under the one in front
+   * of it. `opts.species` picks the silhouette; `opts.body` picks the colour.
    */
   function drawChicken(cx, cy, size, dirIdx, opts) {
     opts = opts || {};
     var alpha = opts.alpha == null ? 1 : opts.alpha;
-    var body = opts.body || '#ffffff';
+    var species = speciesOf(opts.species);
+    var body = opts.body || SPECIES[species].colors[0];
     var sxs = opts.sx == null ? 1 : opts.sx;
     var sys = opts.sy == null ? 1 : opts.sy;
     var T = View.tile;
@@ -1334,70 +1387,214 @@
     var shadeBody = shade(isWhite ? '#e8eef4' : body, 0.90);
     var liteBody = isWhite ? '#ffffff' : shade(body, 1.10);
 
-    // Tail fan, pointing back at the camera
-    ctx.fillStyle = shadeBody;
-    ctx.beginPath();
-    ctx.moveTo(-s * 0.17, s * 0.16);
-    ctx.lineTo(s * 0.17, s * 0.16);
-    ctx.lineTo(s * 0.12, s * 0.45);
-    ctx.lineTo(s * 0.045, s * 0.34);
-    ctx.lineTo(-s * 0.045, s * 0.45);
-    ctx.lineTo(-s * 0.12, s * 0.34);
-    ctx.closePath();
-    ctx.fill(); ctx.stroke();
-
-    // Feet
-    ctx.fillStyle = '#f5a623';
-    rr(ctx, -s * 0.21, s * 0.28, s * 0.14, s * 0.17, s * 0.055); ctx.fill(); ctx.stroke();
-    rr(ctx, s * 0.07, s * 0.28, s * 0.14, s * 0.17, s * 0.055); ctx.fill(); ctx.stroke();
-
-    // Body
-    ctx.fillStyle = body;
-    ellipse(ctx, 0, s * 0.06, s * 0.365, s * 0.385); ctx.fill(); ctx.stroke();
-    // Soft top-light so the body reads round, not flat
-    ctx.fillStyle = liteBody;
-    ctx.globalAlpha *= 0.55;
-    ellipse(ctx, 0, -s * 0.02, s * 0.24, s * 0.22); ctx.fill();
-    ctx.globalAlpha /= 0.55;
-
-    // Folded wings, tucked against the flanks rather than stuck on the sides
-    ctx.fillStyle = shadeBody;
-    [-1, 1].forEach(function (side) {
-      ctx.beginPath();
-      ctx.ellipse(side * s * 0.215, s * 0.11, s * 0.088, s * 0.175, side * 0.26, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-    });
-
-    // Head
-    ctx.fillStyle = body;
-    ellipse(ctx, 0, -s * 0.25, s * 0.245, s * 0.235); ctx.fill(); ctx.stroke();
-
-    // Beak tip, just cresting the far side of the head
-    ctx.fillStyle = '#ef8f1c';
-    ctx.beginPath();
-    ctx.moveTo(-s * 0.065, -s * 0.435);
-    ctx.lineTo(s * 0.065, -s * 0.435);
-    ctx.lineTo(0, -s * 0.525);
-    ctx.closePath();
-    ctx.fill(); ctx.stroke();
-
-    // Comb: three rounded bumps
-    ctx.fillStyle = '#e8453c';
-    ctx.beginPath();
-    ctx.arc(-s * 0.095, -s * 0.415, s * 0.078, Math.PI * 0.98, Math.PI * 2.02);
-    ctx.arc(s * 0.005, -s * 0.465, s * 0.086, Math.PI * 0.98, Math.PI * 2.02);
-    ctx.arc(s * 0.105, -s * 0.415, s * 0.072, Math.PI * 0.98, Math.PI * 2.02);
-    ctx.closePath();
-    ctx.fill(); ctx.stroke();
-
-    // Eyes peeking round the sides of the head
-    ctx.fillStyle = '#1b2530';
-    ellipse(ctx, -s * 0.155, -s * 0.255, s * 0.043, s * 0.050); ctx.fill();
-    ellipse(ctx, s * 0.155, -s * 0.255, s * 0.043, s * 0.050); ctx.fill();
+    (CRITTER_BODY[species] || CRITTER_BODY.chicken)(s, body, shadeBody, liteBody);
 
     ctx.restore();
   }
+
+  var CRITTER_BODY = {
+
+    chicken: function (s, body, shadeBody, liteBody) {
+      // Tail fan, pointing back at the camera
+      ctx.fillStyle = shadeBody;
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.17, s * 0.16);
+      ctx.lineTo(s * 0.17, s * 0.16);
+      ctx.lineTo(s * 0.12, s * 0.45);
+      ctx.lineTo(s * 0.045, s * 0.34);
+      ctx.lineTo(-s * 0.045, s * 0.45);
+      ctx.lineTo(-s * 0.12, s * 0.34);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+
+      // Feet
+      ctx.fillStyle = '#f5a623';
+      rr(ctx, -s * 0.21, s * 0.28, s * 0.14, s * 0.17, s * 0.055); ctx.fill(); ctx.stroke();
+      rr(ctx, s * 0.07, s * 0.28, s * 0.14, s * 0.17, s * 0.055); ctx.fill(); ctx.stroke();
+
+      // Body
+      ctx.fillStyle = body;
+      ellipse(ctx, 0, s * 0.06, s * 0.365, s * 0.385); ctx.fill(); ctx.stroke();
+      // Soft top-light so the body reads round, not flat
+      ctx.fillStyle = liteBody;
+      ctx.globalAlpha *= 0.55;
+      ellipse(ctx, 0, -s * 0.02, s * 0.24, s * 0.22); ctx.fill();
+      ctx.globalAlpha /= 0.55;
+
+      // Folded wings, tucked against the flanks rather than stuck on the sides
+      ctx.fillStyle = shadeBody;
+      [-1, 1].forEach(function (side) {
+        ctx.beginPath();
+        ctx.ellipse(side * s * 0.215, s * 0.11, s * 0.088, s * 0.175, side * 0.26, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      });
+
+      // Head
+      ctx.fillStyle = body;
+      ellipse(ctx, 0, -s * 0.25, s * 0.245, s * 0.235); ctx.fill(); ctx.stroke();
+
+      // Beak tip, just cresting the far side of the head
+      ctx.fillStyle = '#ef8f1c';
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.065, -s * 0.435);
+      ctx.lineTo(s * 0.065, -s * 0.435);
+      ctx.lineTo(0, -s * 0.525);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+
+      // Comb: three rounded bumps
+      ctx.fillStyle = '#e8453c';
+      ctx.beginPath();
+      ctx.arc(-s * 0.095, -s * 0.415, s * 0.078, Math.PI * 0.98, Math.PI * 2.02);
+      ctx.arc(s * 0.005, -s * 0.465, s * 0.086, Math.PI * 0.98, Math.PI * 2.02);
+      ctx.arc(s * 0.105, -s * 0.415, s * 0.072, Math.PI * 0.98, Math.PI * 2.02);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+
+      // Eyes peeking round the sides of the head
+      ctx.fillStyle = '#1b2530';
+      ellipse(ctx, -s * 0.155, -s * 0.255, s * 0.043, s * 0.050); ctx.fill();
+      ellipse(ctx, s * 0.155, -s * 0.255, s * 0.043, s * 0.050); ctx.fill();
+    },
+
+    duck: function (s, body, shadeBody, liteBody) {
+      // Small rounded tail tuft
+      ctx.fillStyle = shadeBody;
+      rr(ctx, -s * 0.10, s * 0.14, s * 0.20, s * 0.22, s * 0.09); ctx.fill(); ctx.stroke();
+
+      // Webbed feet
+      ctx.fillStyle = '#ef8f1c';
+      rr(ctx, -s * 0.21, s * 0.27, s * 0.15, s * 0.16, s * 0.05); ctx.fill(); ctx.stroke();
+      rr(ctx, s * 0.06, s * 0.27, s * 0.15, s * 0.16, s * 0.05); ctx.fill(); ctx.stroke();
+
+      // Body — plumper and rounder than the chicken
+      ctx.fillStyle = body;
+      ellipse(ctx, 0, s * 0.08, s * 0.40, s * 0.40); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = liteBody;
+      ctx.globalAlpha *= 0.55;
+      ellipse(ctx, 0, 0, s * 0.26, s * 0.24); ctx.fill();
+      ctx.globalAlpha /= 0.55;
+
+      // Folded wings
+      ctx.fillStyle = shadeBody;
+      [-1, 1].forEach(function (side) {
+        ctx.beginPath();
+        ctx.ellipse(side * s * 0.23, s * 0.10, s * 0.09, s * 0.17, side * 0.24, 0, Math.PI * 2);
+        ctx.fill(); ctx.stroke();
+      });
+
+      // Head — round, sits high
+      ctx.fillStyle = body;
+      ellipse(ctx, 0, -s * 0.27, s * 0.26, s * 0.245); ctx.fill(); ctx.stroke();
+
+      // Flat wide bill cresting the head
+      ctx.fillStyle = '#ef8f1c';
+      rr(ctx, -s * 0.135, -s * 0.50, s * 0.27, s * 0.11, s * 0.05); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(0,0,0,0.28)';
+      ellipse(ctx, 0, -s * 0.455, s * 0.02, s * 0.014); ctx.fill();
+
+      // Eyes
+      ctx.fillStyle = '#1b2530';
+      ellipse(ctx, -s * 0.16, -s * 0.27, s * 0.042, s * 0.048); ctx.fill();
+      ellipse(ctx, s * 0.16, -s * 0.27, s * 0.042, s * 0.048); ctx.fill();
+    },
+
+    pig: function (s, body, shadeBody, liteBody) {
+      // Curly tail
+      ctx.strokeStyle = shadeBody;
+      ctx.lineWidth = Math.max(1.6, s * 0.045);
+      ctx.beginPath();
+      ctx.arc(0, s * 0.30, s * 0.075, 0.3, Math.PI * 1.9);
+      ctx.stroke();
+
+      // Trotters
+      ctx.fillStyle = shade(body, 0.72);
+      rr(ctx, -s * 0.19, s * 0.27, s * 0.13, s * 0.15, s * 0.045); ctx.fill(); ctx.stroke();
+      rr(ctx, s * 0.06, s * 0.27, s * 0.13, s * 0.15, s * 0.045); ctx.fill(); ctx.stroke();
+
+      // Body — big and round
+      ctx.fillStyle = body;
+      ellipse(ctx, 0, s * 0.07, s * 0.40, s * 0.40); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = liteBody;
+      ctx.globalAlpha *= 0.5;
+      ellipse(ctx, 0, -s * 0.01, s * 0.25, s * 0.23); ctx.fill();
+      ctx.globalAlpha /= 0.5;
+
+      // Head
+      ctx.fillStyle = body;
+      ellipse(ctx, 0, -s * 0.26, s * 0.26, s * 0.25); ctx.fill(); ctx.stroke();
+
+      // Floppy ears instead of a comb
+      ctx.fillStyle = shadeBody;
+      [-1, 1].forEach(function (side) {
+        ctx.beginPath();
+        ctx.moveTo(side * s * 0.16, -s * 0.44);
+        ctx.lineTo(side * s * 0.30, -s * 0.34);
+        ctx.lineTo(side * s * 0.13, -s * 0.28);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+      });
+
+      // Snout cresting the head
+      ctx.fillStyle = shade(body, 1.05);
+      rr(ctx, -s * 0.10, -s * 0.46, s * 0.20, s * 0.14, s * 0.06); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ellipse(ctx, -s * 0.045, -s * 0.395, s * 0.018, s * 0.024); ctx.fill();
+      ellipse(ctx, s * 0.045, -s * 0.395, s * 0.018, s * 0.024); ctx.fill();
+
+      // Eyes
+      ctx.fillStyle = '#1b2530';
+      ellipse(ctx, -s * 0.155, -s * 0.27, s * 0.040, s * 0.046); ctx.fill();
+      ellipse(ctx, s * 0.155, -s * 0.27, s * 0.040, s * 0.046); ctx.fill();
+    },
+
+    manatee: function (s, body, shadeBody, liteBody) {
+      // Flat paddle tail
+      ctx.fillStyle = shadeBody;
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.20, s * 0.20);
+      ctx.lineTo(s * 0.20, s * 0.20);
+      ctx.quadraticCurveTo(s * 0.30, s * 0.42, 0, s * 0.48);
+      ctx.quadraticCurveTo(-s * 0.30, s * 0.42, -s * 0.20, s * 0.20);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+
+      // Small flippers instead of feet, low on the body
+      ctx.fillStyle = shadeBody;
+      [-1, 1].forEach(function (side) {
+        ctx.beginPath();
+        ctx.ellipse(side * s * 0.30, s * 0.10, s * 0.09, s * 0.16, side * 0.5, 0, Math.PI * 2);
+        ctx.fill(); ctx.stroke();
+      });
+
+      // Big, blobby body — a manatee is basically one shape
+      ctx.fillStyle = body;
+      ellipse(ctx, 0, s * 0.06, s * 0.42, s * 0.42); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = liteBody;
+      ctx.globalAlpha *= 0.45;
+      ellipse(ctx, 0, -s * 0.02, s * 0.27, s * 0.24); ctx.fill();
+      ctx.globalAlpha /= 0.45;
+
+      // Head blends into the body — barely narrower
+      ctx.fillStyle = body;
+      ellipse(ctx, 0, -s * 0.26, s * 0.30, s * 0.26); ctx.fill(); ctx.stroke();
+
+      // Wide, wrinkled snout pad cresting the head
+      ctx.fillStyle = shade(body, 0.88);
+      rr(ctx, -s * 0.16, -s * 0.47, s * 0.32, s * 0.16, s * 0.08); ctx.fill(); ctx.stroke();
+      // Whiskers
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      for (var i = -1; i <= 1; i++) {
+        ellipse(ctx, i * s * 0.09, -s * 0.40, s * 0.012, s * 0.012); ctx.fill();
+      }
+
+      // Small, close-set eyes
+      ctx.fillStyle = '#1b2530';
+      ellipse(ctx, -s * 0.14, -s * 0.28, s * 0.032, s * 0.036); ctx.fill();
+      ellipse(ctx, s * 0.14, -s * 0.28, s * 0.032, s * 0.036); ctx.fill();
+    }
+  };
 
 
   function drawPlayer() {
@@ -1423,7 +1620,9 @@
       ctx.restore();
     }
 
-    drawChicken(cx, groundY - lift - T * 0.06, size, Player.dir, { sx: widen, sy: stretch });
+    drawChicken(cx, groundY - lift - T * 0.06, size, Player.dir, {
+      sx: widen, sy: stretch, species: Player.species, body: Player.bodyColor
+    });
   }
 
   function drawDeath(cx, cy, size) {
@@ -1435,7 +1634,8 @@
       var sink = easeOutCubic(p);
       ctx.save();
       ctx.globalAlpha = 1 - sink * 0.85;
-      drawChicken(cx, cy - T * 0.05 + sink * T * 0.22, size * (1 - sink * 0.4), Player.dir, {});
+      drawChicken(cx, cy - T * 0.05 + sink * T * 0.22, size * (1 - sink * 0.4), Player.dir,
+        { species: Player.species, body: Player.bodyColor });
       ctx.restore();
       ctx.strokeStyle = 'rgba(255,255,255,' + (0.75 * (1 - p)) + ')';
       ctx.lineWidth = Math.max(1.5, T * 0.06);
@@ -1452,13 +1652,14 @@
       ctx.globalAlpha = 1 - fly * 0.6;
       ctx.translate(cx + off, cy - T * 0.05 - Math.sin(p * Math.PI) * T * 1.4);
       ctx.rotate(fly * d.dir * 7);
-      drawChicken(0, 0, size, Player.dir, { sy: 0.55, sx: 1.3 });
+      drawChicken(0, 0, size, Player.dir,
+        { sy: 0.55, sx: 1.3, species: Player.species, body: Player.bodyColor });
       ctx.restore();
     } else {
       var f = easeOutCubic(p);
       drawShadow(cx, cy + T * 0.24, T * 0.34, T * 0.14, 0.3);
       drawChicken(cx, cy + f * T * 0.20 - T * 0.05, size, Player.dir, {
-        sx: 1 + f * 0.75, sy: 1 - f * 0.80
+        sx: 1 + f * 0.75, sy: 1 - f * 0.80, species: Player.species, body: Player.bodyColor
       });
       ctx.fillStyle = 'rgba(255,255,255,' + (0.85 * (1 - p)) + ')';
       for (var k = 0; k < 5; k++) {
@@ -1477,7 +1678,8 @@
     ctx.save();
     ctx.globalAlpha = 0.40;
     drawShadow(sx(g.fx), sy(g.frow) + T * 0.26, T * 0.28, T * 0.12, 0.35);
-    drawChicken(sx(g.fx), sy(g.frow) - T * 0.06, T * 0.86, 0, { body: '#ff9f43' });
+    drawChicken(sx(g.fx), sy(g.frow) - T * 0.06, T * 0.86, 0,
+      { species: g.species || 'chicken', body: g.bodyColor || '#ff9f43' });
     ctx.restore();
   }
 
@@ -2125,6 +2327,13 @@
         UI.renderH2H('menu', H2H.lastRival());
       });
 
+      Player.species = Cosmetics.species();
+      Player.bodyColor = Cosmetics.color();
+      this.renderSpeciesRow();
+      this.renderColorRow();
+      this.renderCosmeticPreview();
+      window.addEventListener('resize', function () { UI.renderCosmeticPreview(); });
+
       $('btn-sound').addEventListener('click', function () {
         SFX.setOn(!SFX.on);
         $('btn-sound').textContent = SFX.on ? '🔊' : '🔇';
@@ -2134,7 +2343,9 @@
       $('btn-create').addEventListener('click', function () {
         if (!Net.socket || !Net.socket.connected) { UI.toast('NOT CONNECTED'); return; }
         SFX.ensure();
-        Net.socket.emit('createMatch', { name: H2H.read('cr_name', '') }, function (res) {
+        Net.socket.emit('createMatch', {
+          name: H2H.read('cr_name', ''), species: Cosmetics.species(), bodyColor: Cosmetics.color()
+        }, function (res) {
           if (res && res.ok) {
             Net.code = res.code;
             UI.setLobbyCode(res.code);
@@ -2208,7 +2419,9 @@
       if (code.length !== 4) { $('join-error').textContent = 'ENTER ALL 4 LETTERS'; return; }
       if (!Net.socket || !Net.socket.connected) { $('join-error').textContent = 'NOT CONNECTED'; return; }
       $('btn-join').setAttribute('disabled', 'true');
-      Net.socket.emit('joinMatch', { code: code, name: H2H.read('cr_name', '') }, function (res) {
+      Net.socket.emit('joinMatch', {
+        code: code, name: H2H.read('cr_name', ''), species: Cosmetics.species(), bodyColor: Cosmetics.color()
+      }, function (res) {
         $('btn-join').removeAttribute('disabled');
         if (res && res.ok) { Net.code = res.code; $('code-input').blur(); }
         else { $('join-error').textContent = (res && res.error) || 'COULD NOT JOIN'; }
@@ -2235,6 +2448,87 @@
     },
 
     setLobbyCode: function (code) { $('code-display').textContent = code || '----'; },
+
+    /* ---- customize: animal + colour ---- */
+
+    renderSpeciesRow: function () {
+      var row = $('species-row');
+      var current = Cosmetics.species();
+      row.innerHTML = '';
+      SPECIES_ORDER.forEach(function (key) {
+        var sp = SPECIES[key];
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'species-btn' + (key === current ? ' selected' : '');
+        btn.textContent = sp.emoji;
+        btn.setAttribute('role', 'radio');
+        btn.setAttribute('aria-checked', key === current ? 'true' : 'false');
+        btn.setAttribute('aria-label', sp.label);
+        btn.addEventListener('click', function () {
+          if (Cosmetics.species() === key) return;
+          Cosmetics.setSpecies(key);
+          Player.species = Cosmetics.species();
+          Player.bodyColor = Cosmetics.color();
+          SFX.ensure(); SFX.blip(520, 0.05, 'square', 0.02, 620);
+          UI.renderSpeciesRow();
+          UI.renderColorRow();
+          UI.renderCosmeticPreview();
+        });
+        row.appendChild(btn);
+      });
+    },
+
+    renderColorRow: function () {
+      var row = $('color-row');
+      var species = Cosmetics.species();
+      var current = Cosmetics.color();
+      row.innerHTML = '';
+      SPECIES[species].colors.forEach(function (hex) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'color-swatch' + (hex === current ? ' selected' : '');
+        btn.style.background = hex;
+        btn.setAttribute('role', 'radio');
+        btn.setAttribute('aria-checked', hex === current ? 'true' : 'false');
+        btn.setAttribute('aria-label', hex);
+        btn.addEventListener('click', function () {
+          if (Cosmetics.color() === hex) return;
+          Cosmetics.setColor(hex);
+          Player.bodyColor = hex;
+          SFX.ensure(); SFX.blip(520, 0.05, 'square', 0.02, 620);
+          UI.renderColorRow();
+          UI.renderCosmeticPreview();
+        });
+        row.appendChild(btn);
+      });
+    },
+
+    /**
+     * A static portrait of the chosen animal, reusing the exact same sprite
+     * code the board draws with — no separate art to keep in sync. `ctx` and
+     * `View` are just module variables, so this swaps them for the preview
+     * canvas' own for the one call, then puts the game's back.
+     */
+    renderCosmeticPreview: function () {
+      var pc = $('cosmetic-preview');
+      if (!pc || pc.offsetParent === null) return;   // menu not visible — skip
+      var pctx = pc.getContext('2d');
+      var dpr = Math.min(window.devicePixelRatio || 1, 3);
+      var w = pc.clientWidth, h = pc.clientHeight;
+      if (!w || !h) return;
+      var pw = Math.round(w * dpr), ph = Math.round(h * dpr);
+      if (pc.width !== pw) pc.width = pw;
+      if (pc.height !== ph) pc.height = ph;
+      pctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      pctx.clearRect(0, 0, w, h);
+
+      var savedCtx = ctx, savedView = View;
+      ctx = pctx;
+      View = { tile: Math.min(w, h) * 0.60 };
+      drawChicken(w / 2, h * 0.58, View.tile, 0,
+        { species: Cosmetics.species(), body: Cosmetics.color() });
+      ctx = savedCtx; View = savedView;
+    },
 
     /**
      * Paint a lifetime H2H strip ("YOU 4 - 2 MAYA") for menu/lobby/end.
@@ -2295,13 +2589,18 @@
       Game.ghost = {
         x: 0, row: 0, fx: 0, frow: 0,
         pending: 0, banked: 0,
-        status: 'running', active: true
+        status: 'running', active: true,
+        species: (d.opponent && SPECIES[d.opponent.species]) ? d.opponent.species : 'chicken',
+        bodyColor: (d.opponent && d.opponent.bodyColor) || '#ff9f43'
       };
       Game.startAt = d.startAt;
       Game.phase = 'countdown';
       Game.rivalName = (d.opponent && d.opponent.name) || 'RIVAL';
+      Game.rivalSpecies = Game.ghost.species;
 
       Game.myName = (d.you && d.you.name) || 'YOU';
+      Player.species = Cosmetics.species();
+      Player.bodyColor = Cosmetics.color();
       $('rt-name').textContent = Game.rivalName;
 
       this.hideAllScreens();
@@ -2324,6 +2623,8 @@
       Game.phase = 'countdown';
       Game.rivalName = 'PRACTICE';
       Game.myName = H2H.read('cr_name', '') || 'YOU';
+      Player.species = Cosmetics.species();
+      Player.bodyColor = Cosmetics.color();
 
       this.hideAllScreens();
       $('btn-again').removeAttribute('disabled');
@@ -2458,6 +2759,11 @@
       $('end-you-score').textContent = myBanked;
       $('end-opp-name').textContent = rival;
       $('end-opp-score').textContent = theirBanked;
+
+      var meSpecies = speciesOf(d.you.species || Player.species);
+      var rivalSpecies = speciesOf((d.opponent && d.opponent.species) || Game.ghost.species);
+      $('end-you-avatar').textContent = SPECIES[meSpecies].emoji;
+      $('end-opp-avatar').textContent = SPECIES[rivalSpecies].emoji;
 
       var yf = $('end-you-fate');
       yf.textContent = d.you.status === 'banked' ? 'BANKED' : 'WIPED OUT';
