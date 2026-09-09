@@ -84,11 +84,26 @@ function sanitizeName(n) {
   return n.replace(/[^\w \-]/g, '').trim().slice(0, 12).toUpperCase();
 }
 
-function newPlayer(socket, slot, name) {
+// Cosmetic only — never touches gameplay — but still whitelisted server-side
+// since it comes straight off the wire from the other player's client.
+const SPECIES = ['chicken', 'duck', 'pig', 'manatee'];
+const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+
+function sanitizeSpecies(s) {
+  return SPECIES.includes(s) ? s : 'chicken';
+}
+
+function sanitizeColor(c) {
+  return typeof c === 'string' && HEX_COLOR.test(c) ? c : '#ffffff';
+}
+
+function newPlayer(socket, slot, name, species, bodyColor) {
   return {
     id: socket.id,
     slot,                       // 0 = host, 1 = challenger (drives avatar colour)
     name: sanitizeName(name) || (slot === 0 ? 'PLAYER 1' : 'PLAYER 2'),
+    species: sanitizeSpecies(species),
+    bodyColor: sanitizeColor(bodyColor),
     x: 0,
     y: 0,
     pending: 0,                 // live, at-risk score
@@ -99,7 +114,7 @@ function newPlayer(socket, slot, name) {
   };
 }
 
-function createRoom(socket, name) {
+function createRoom(socket, name, species, bodyColor) {
   const code = makeCode();
   const room = {
     code,
@@ -108,7 +123,7 @@ function createRoom(socket, name) {
     startAt: 0,
     createdAt: Date.now(),
     touchedAt: Date.now(),
-    players: [newPlayer(socket, 0, name)]
+    players: [newPlayer(socket, 0, name, species, bodyColor)]
   };
   rooms.set(code, room);
   socketRoom.set(socket.id, code);
@@ -173,8 +188,8 @@ function startMatch(room) {
     io.to(p.id).emit('matchStart', {
       seed: room.seed,
       startAt: room.startAt,
-      you: { slot: p.slot, name: p.name },
-      opponent: opp ? { slot: opp.slot, name: opp.name } : null
+      you: { slot: p.slot, name: p.name, species: p.species, bodyColor: p.bodyColor },
+      opponent: opp ? { slot: opp.slot, name: opp.name, species: opp.species, bodyColor: opp.bodyColor } : null
     });
   }
 
@@ -207,11 +222,15 @@ function endMatch(room, reason) {
     io.to(p.id).emit('matchEnd', {
       reason,
       result,
-      you: { name: p.name, slot: p.slot, banked: p.banked, status: p.status },
+      you: {
+        name: p.name, slot: p.slot, banked: p.banked, status: p.status,
+        species: p.species, bodyColor: p.bodyColor
+      },
       opponent: opp
         ? {
             name: opp.name, slot: opp.slot, banked: opp.banked,
-            status: opp.status, connected: opp.connected
+            status: opp.status, connected: opp.connected,
+            species: opp.species, bodyColor: opp.bodyColor
           }
         : null
     });
@@ -230,7 +249,7 @@ io.on('connection', (socket) => {
 
   socket.on('createMatch', (payload, ack) => {
     if (roomOf(socket)) leaveRoom(socket);
-    const room = createRoom(socket, payload && payload.name);
+    const room = createRoom(socket, payload && payload.name, payload && payload.species, payload && payload.bodyColor);
     if (typeof ack === 'function') ack({ ok: true, code: room.code, slot: 0 });
     pushLobby(room);
   });
@@ -248,7 +267,7 @@ io.on('connection', (socket) => {
     }
 
     if (roomOf(socket)) leaveRoom(socket);
-    const player = newPlayer(socket, 1, payload && payload.name);
+    const player = newPlayer(socket, 1, payload && payload.name, payload && payload.species, payload && payload.bodyColor);
     room.players.push(player);
     socketRoom.set(socket.id, code);
     socket.join(code);
