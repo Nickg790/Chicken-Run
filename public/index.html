@@ -69,6 +69,13 @@
            autocomplete="off" autocorrect="off" autocapitalize="characters"
            spellcheck="false" maxlength="12" placeholder="YOUR NAME" aria-label="Your name" />
 
+    <!-- ================= CUSTOMIZE (animal + colour) ================= -->
+    <div class="cosmetic" id="cosmetic">
+      <canvas id="cosmetic-preview" class="cosmetic-preview" aria-hidden="true"></canvas>
+      <div class="species-row" id="species-row" role="radiogroup" aria-label="Choose your animal"></div>
+      <div class="color-row" id="color-row" role="radiogroup" aria-label="Choose a colour"></div>
+    </div>
+
     <div class="menu-buttons">
       <button class="btn btn-primary" id="btn-create">CREATE MATCH</button>
       <button class="btn btn-secondary" id="btn-join-screen">JOIN MATCH</button>
