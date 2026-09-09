@@ -602,7 +602,7 @@
     ghost: {
       x: 0, row: 0, fx: 0, frow: 0,
       pending: 0, banked: 0,
-      status: 'running', active: false,
+      status: 'running', active: false, deadHidden: false,
       species: 'chicken', bodyColor: '#ff9f43'   // set from the opponent's own pick at matchStart
     },
     lastFrame: 0,
@@ -1690,7 +1690,18 @@
     var T = View.tile;
     var p = toScreen(sx(g.fx), sy(g.frow));
 
-    if (p.y > View.h * 0.14 && p.y < View.h * 0.92) {
+    // You sit at PLAYER_SCREEN_Y (0.70), so there is roughly three times as
+    // much screen above you as below. Judging "gone from view" by fixed screen
+    // edges meant a rival had to get ~9 rows AHEAD to raise the up arrow but
+    // only ~3 rows BEHIND to raise the down one — so in practice only the
+    // behind case ever appeared. Give both directions the same slack around
+    // you instead: the lower edge is unchanged, the upper one comes down to
+    // match it, and the gap now reads the same either way.
+    var SLACK = 0.22;                        // screen heights either side of you
+    var edgeAhead = View.h * (CFG.PLAYER_SCREEN_Y - SLACK);
+    var edgeBehind = View.h * (CFG.PLAYER_SCREEN_Y + SLACK);
+
+    if (p.y > edgeAhead && p.y < edgeBehind) {
       ctx.save();
       ctx.globalAlpha = 0.78;
       ctx.fillStyle = g.status === 'banked' ? PAL.neon : '#ff9f43';
@@ -1705,7 +1716,7 @@
       return;
     }
 
-    var ahead = p.y <= View.h * 0.14;
+    var ahead = p.y <= edgeAhead;
     var py = ahead ? View.h * 0.17 : View.h * 0.88;
     var delta = Math.round(g.frow - Player.frow);
 
@@ -1978,7 +1989,15 @@
     SFX.death();
     if (navigator.vibrate) { try { navigator.vibrate(kind === 'splash' ? 40 : [0, 60, 40, 90]); } catch (e) {} }
 
-    Net.sendState(true);
+    // Send the score they had a moment ago, not the 0 we just wrote. This
+    // packet is relay-only (the server takes run status from `died` below,
+    // never from the stream), and it is the last thing the rival's client
+    // hears from us — so if it carried the post-death 0, their pill would
+    // snap to 0 and announce the death that oppDied deliberately stays quiet
+    // about. Their view freezes on our last live score instead. The server's
+    // own record is still zeroed by the `died` handler, so the result is
+    // unaffected.
+    Net.sendState(true, lost);
     Net.emit('died', {});
     UI.refreshCashout();
     if (Game.solo) setTimeout(function () { UI.showEndSolo(); }, 1300);
@@ -2074,7 +2093,8 @@
       var followRow = Player.frow, followX = Player.fx;
       if (!Game.solo && Game.phase === 'resolved' &&
           Game.t - Game.resolveAt > 1.1 &&
-          Game.ghost.active && Game.ghost.status === 'running') {
+          Game.ghost.active && Game.ghost.status === 'running' &&
+          !Game.ghost.deadHidden) {          // never drift off to watch a frozen rival
         followRow = Game.ghost.frow;
         followX = Game.ghost.fx;
         if (!Game.spectating) {
@@ -2244,12 +2264,21 @@
       });
 
       s.on('oppDied', function () {
-        var g = Game.ghost;
-        g.status = 'dead';
-        g.pending = 0;
-        g.banked = 0;
-        UI.toast('RIVAL WIPED OUT — THEY BANKED 0');
-        Popups.add('RIVAL WIPED OUT', PAL.neon, { size: 0.34, vy: 1.0, centre: true, life: 1.2 });
+        // Deliberately silent. Announcing that your rival is out mid-run ends
+        // the match in spirit before it ends in fact: you know 0 already beats
+        // them, so you bank on the spot and the last stretch — the part the
+        // whole game is built around — never gets played.
+        //
+        // So nothing is shown. Their ghost and score simply stop updating
+        // (their client stops streaming the moment they die), which leaves
+        // them frozen at their last position looking like someone playing it
+        // safe. Nothing false is drawn: that IS their last known state. The
+        // truth lands on the results screen, from the server, as it always did.
+        //
+        // `status` deliberately stays 'running' — it is what the ghost and the
+        // rival pill read from. `deadHidden` carries the truth for logic that
+        // must not be fooled (see the spectate camera).
+        Game.ghost.deadHidden = true;
       });
 
       s.on('oppCashout', function (d) {
@@ -2291,13 +2320,14 @@
 
     stopStream: function () { clearInterval(this.timer); this.timer = 0; },
 
-    sendState: function (force) {
+    /** `pendingOverride` lets onDeath relay its pre-death score — see there. */
+    sendState: function (force, pendingOverride) {
       if (Game.solo || !this.socket || !this.socket.connected) return;
       if (!force && Game.phase !== 'playing' && Game.phase !== 'countdown') return;
       this.socket.emit('state', {
         x: Math.round(Player.fx * 100) / 100,
         y: Math.round(Player.frow * 100) / 100,
-        p: Player.pending,
+        p: pendingOverride == null ? Player.pending : pendingOverride,
         a: Player.isRunning() ? 1 : 0
       });
     }
@@ -2589,7 +2619,7 @@
       Game.ghost = {
         x: 0, row: 0, fx: 0, frow: 0,
         pending: 0, banked: 0,
-        status: 'running', active: true,
+        status: 'running', active: true, deadHidden: false,
         species: (d.opponent && SPECIES[d.opponent.species]) ? d.opponent.species : 'chicken',
         bodyColor: (d.opponent && d.opponent.bodyColor) || '#ff9f43'
       };
@@ -2618,6 +2648,7 @@
       this.resetRun();
       Game.ghost.active = false;
       Game.ghost.status = 'running';
+      Game.ghost.deadHidden = false;
       Game.startAt = Date.now() + 3200;
       Net.offset = 0;
       Game.phase = 'countdown';
